@@ -1736,7 +1736,6 @@ async def analyze_incident(incident_id: str, user: dict = Depends(get_current_us
     # Get related data
     pings = await db.location_pings.find({"incident_id": incident_id}).sort("timestamp", 1).to_list(100)
     evidence = await db.evidence.find({"incident_id": incident_id}).to_list(50)
-    user_profile = await db.emergency_profiles.find_one({"email": incident.get("owner_email")})
     
     # Build context
     context = f"""
