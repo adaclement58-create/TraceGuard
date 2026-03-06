@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { User, Shield, Bell, Lock, Save, Loader2, Eye, EyeOff, Trash2 } from 'lucide-react';
+import { User, Shield, Bell, Lock, Save, Loader2, Eye, EyeOff, Trash2, BellRing, BellOff } from 'lucide-react';
 import { Input } from '../components/ui/input';
 import { Button } from '../components/ui/button';
 import { Switch } from '../components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
+import { usePushNotifications } from '../hooks/usePushNotifications';
 
 const bloodGroups = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
 
@@ -16,6 +17,17 @@ const Settings = () => {
   const [saving, setSaving] = useState(false);
   const [showPin, setShowPin] = useState(false);
   const [showDuressPin, setShowDuressPin] = useState(false);
+  
+  // Push notifications hook
+  const { 
+    isSupported: pushSupported, 
+    isSubscribed: pushSubscribed, 
+    permission: pushPermission,
+    loading: pushLoading,
+    subscribe: subscribePush,
+    unsubscribe: unsubscribePush,
+    sendTestNotification
+  } = usePushNotifications();
 
   const [formData, setFormData] = useState({
     full_name: '',
@@ -325,6 +337,62 @@ const Settings = () => {
             <p className="text-sm text-zinc-500 text-center">
               These features require <a href="/subscription" className="text-tg-safe hover:underline">Premium</a>
             </p>
+          )}
+        </div>
+      </div>
+
+      {/* Push Notifications */}
+      <div className="tg-card p-6">
+        <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+          <BellRing className="w-5 h-5 text-zinc-400" />
+          Push Notifications
+        </h2>
+
+        <div className="space-y-4">
+          {!pushSupported ? (
+            <div className="p-4 bg-zinc-800/50 rounded-xl text-center">
+              <BellOff className="w-8 h-8 mx-auto mb-2 text-zinc-500" />
+              <p className="text-zinc-400">Push notifications are not supported in this browser</p>
+              <p className="text-xs text-zinc-500 mt-1">Use Chrome, Edge, or Safari for push support</p>
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center justify-between p-4 bg-zinc-800/50 rounded-xl">
+                <div>
+                  <p className="font-medium">Enable Push Notifications</p>
+                  <p className="text-sm text-zinc-500">
+                    {pushPermission === 'denied' 
+                      ? 'Permission denied - enable in browser settings'
+                      : 'Receive alerts even when the app is closed'
+                    }
+                  </p>
+                </div>
+                <Switch
+                  checked={pushSubscribed}
+                  onCheckedChange={pushSubscribed ? unsubscribePush : subscribePush}
+                  disabled={pushLoading || pushPermission === 'denied'}
+                  data-testid="push-toggle"
+                />
+              </div>
+
+              {pushSubscribed && (
+                <Button
+                  variant="outline"
+                  onClick={() => sendTestNotification('Test Notification', { body: 'This is a test notification from TRACEGUARD' })}
+                  className="w-full"
+                  data-testid="test-push-btn"
+                >
+                  <BellRing className="w-4 h-4 mr-2" />
+                  Send Test Notification
+                </Button>
+              )}
+
+              <div className="text-xs text-zinc-500 space-y-1">
+                <p>• You'll receive alerts when contacts trigger SOS</p>
+                <p>• Trip overdue notifications</p>
+                <p>• Safe zone entry/exit alerts</p>
+              </div>
+            </>
           )}
         </div>
       </div>

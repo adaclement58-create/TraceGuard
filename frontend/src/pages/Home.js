@@ -10,6 +10,8 @@ import { Input } from '../components/ui/input';
 import { Button } from '../components/ui/button';
 import { EvidenceCapture } from '../components/EvidenceCapture';
 import { useLiveLocationTracker, useLocationReporter, useGeofenceMonitor, useOfflineSOS } from '../hooks/useLocationTracking';
+import VoiceSOS from '../components/VoiceSOS';
+import QuickAccess from '../components/QuickAccess';
 
 const Home = () => {
   const { user, api } = useAuth();
@@ -392,6 +394,15 @@ const Home = () => {
           <p className="text-xs text-zinc-500">Send test SMS</p>
         </button>
       </div>
+
+      {/* Voice-Activated SOS */}
+      <VoiceSOS 
+        onSOSTriggered={activateSOS}
+        disabled={sosActive}
+      />
+
+      {/* Quick Access - Nearest Safety Points */}
+      <QuickAccess />
 
       {/* Emergency Contacts Preview */}
       {contacts.length > 0 && (

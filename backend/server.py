@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, Request, BackgroundTasks
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, Request, BackgroundTasks, WebSocket, WebSocketDisconnect
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -19,6 +19,7 @@ import re
 import asyncio
 from contextlib import asynccontextmanager
 import math
+import json
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -1504,6 +1505,387 @@ async def update_incident_status(incident_id: str, status: str, resolution_reaso
         raise HTTPException(status_code=404, detail="Incident not found")
     
     return {"status": "updated"}
+
+# ===================== PUSH NOTIFICATIONS =====================
+
+class PushSubscriptionData(BaseModel):
+    subscription: dict
+
+@api_router.post("/push/subscribe")
+async def subscribe_push(data: PushSubscriptionData, user: dict = Depends(get_current_user)):
+    """Subscribe user to push notifications"""
+    await db.push_subscriptions.update_one(
+        {"user_email": user["email"]},
+        {
+            "$set": {
+                "user_email": user["email"],
+                "subscription": data.subscription,
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            }
+        },
+        upsert=True
+    )
+    return {"status": "subscribed"}
+
+@api_router.post("/push/unsubscribe")
+async def unsubscribe_push(user: dict = Depends(get_current_user)):
+    """Unsubscribe user from push notifications"""
+    await db.push_subscriptions.delete_one({"user_email": user["email"]})
+    return {"status": "unsubscribed"}
+
+async def send_push_notification(user_email: str, title: str, body: str, data: dict = None):
+    """Send push notification to a user"""
+    try:
+        sub_doc = await db.push_subscriptions.find_one({"user_email": user_email})
+        if not sub_doc:
+            return False
+        
+        # Note: In production, use a library like pywebpush
+        # For now, we store the notification for the client to poll
+        await db.pending_notifications.insert_one({
+            "id": str(uuid.uuid4()),
+            "user_email": user_email,
+            "title": title,
+            "body": body,
+            "data": data or {},
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "read": False
+        })
+        return True
+    except Exception as e:
+        logger.error(f"Push notification error: {e}")
+        return False
+
+@api_router.get("/push/pending")
+async def get_pending_notifications(user: dict = Depends(get_current_user)):
+    """Get pending notifications for user"""
+    notifications = await db.pending_notifications.find(
+        {"user_email": user["email"], "read": False}
+    ).sort("created_at", -1).limit(20).to_list(20)
+    
+    for n in notifications:
+        n.pop("_id", None)
+    
+    return notifications
+
+@api_router.post("/push/mark-read/{notification_id}")
+async def mark_notification_read(notification_id: str, user: dict = Depends(get_current_user)):
+    """Mark notification as read"""
+    await db.pending_notifications.update_one(
+        {"id": notification_id, "user_email": user["email"]},
+        {"$set": {"read": True}}
+    )
+    return {"status": "marked_read"}
+
+# ===================== WEBSOCKET REAL-TIME UPDATES =====================
+
+class ConnectionManager:
+    """Manages WebSocket connections for real-time updates"""
+    
+    def __init__(self):
+        self.active_connections: Dict[str, List[WebSocket]] = {}
+    
+    async def connect(self, websocket: WebSocket, user_email: str):
+        await websocket.accept()
+        if user_email not in self.active_connections:
+            self.active_connections[user_email] = []
+        self.active_connections[user_email].append(websocket)
+        logger.info(f"[WS] User connected: {user_email}")
+    
+    def disconnect(self, websocket: WebSocket, user_email: str):
+        if user_email in self.active_connections:
+            if websocket in self.active_connections[user_email]:
+                self.active_connections[user_email].remove(websocket)
+            if not self.active_connections[user_email]:
+                del self.active_connections[user_email]
+        logger.info(f"[WS] User disconnected: {user_email}")
+    
+    async def send_personal(self, user_email: str, message: dict):
+        if user_email in self.active_connections:
+            for connection in self.active_connections[user_email]:
+                try:
+                    await connection.send_json(message)
+                except Exception as e:
+                    logger.error(f"[WS] Send error: {e}")
+    
+    async def broadcast_to_contacts(self, user_email: str, message: dict):
+        """Broadcast to user's trusted contacts"""
+        contacts = await db.contacts.find({"owner_email": user_email}).to_list(100)
+        for contact in contacts:
+            contact_email = contact.get("email")
+            if contact_email and contact_email in self.active_connections:
+                await self.send_personal(contact_email, message)
+    
+    async def broadcast_to_family(self, family_owner: str, message: dict):
+        """Broadcast to family members"""
+        members = await db.family_members.find({"owner_email": family_owner}).to_list(100)
+        for member in members:
+            member_email = member.get("member_email")
+            if member_email and member_email in self.active_connections:
+                await self.send_personal(member_email, message)
+
+ws_manager = ConnectionManager()
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket, token: str = None):
+    """WebSocket endpoint for real-time updates"""
+    if not token:
+        await websocket.close(code=4001, reason="No token provided")
+        return
+    
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        user_email = payload.get("sub")
+        if not user_email:
+            await websocket.close(code=4001, reason="Invalid token")
+            return
+    except JWTError:
+        await websocket.close(code=4001, reason="Invalid token")
+        return
+    
+    await ws_manager.connect(websocket, user_email)
+    
+    try:
+        while True:
+            data = await websocket.receive_json()
+            message_type = data.get("type")
+            
+            if message_type == "ping":
+                await websocket.send_json({"type": "pong"})
+            
+            elif message_type == "location_update":
+                # Store location and broadcast to family/contacts
+                location_data = data.get("data", {})
+                await db.user_locations.update_one(
+                    {"email": user_email},
+                    {
+                        "$set": {
+                            "email": user_email,
+                            "latitude": location_data.get("latitude"),
+                            "longitude": location_data.get("longitude"),
+                            "accuracy": location_data.get("accuracy"),
+                            "timestamp": datetime.now(timezone.utc).isoformat()
+                        }
+                    },
+                    upsert=True
+                )
+                
+                # Notify family members
+                await ws_manager.broadcast_to_family(user_email, {
+                    "type": "family_member_location",
+                    "data": {
+                        "email": user_email,
+                        "latitude": location_data.get("latitude"),
+                        "longitude": location_data.get("longitude"),
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    }
+                })
+            
+            elif message_type == "sos_trigger":
+                # Notify contacts about SOS
+                incident_id = data.get("data", {}).get("incident_id")
+                await ws_manager.broadcast_to_contacts(user_email, {
+                    "type": "sos_alert",
+                    "data": {
+                        "from_email": user_email,
+                        "incident_id": incident_id,
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    }
+                })
+    
+    except WebSocketDisconnect:
+        ws_manager.disconnect(websocket, user_email)
+    except Exception as e:
+        logger.error(f"[WS] Error: {e}")
+        ws_manager.disconnect(websocket, user_email)
+
+# Helper to send real-time updates from other endpoints
+async def notify_sos_activated(user_email: str, incident_id: str):
+    """Notify contacts when SOS is activated"""
+    await ws_manager.broadcast_to_contacts(user_email, {
+        "type": "sos_activated",
+        "data": {
+            "from_email": user_email,
+            "incident_id": incident_id,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+    })
+    
+    # Also send push notification
+    contacts = await db.contacts.find({"owner_email": user_email}).to_list(100)
+    for contact in contacts:
+        if contact.get("email"):
+            await send_push_notification(
+                contact["email"],
+                "EMERGENCY SOS ALERT",
+                f"Emergency alert from {user_email}",
+                {"type": "sos", "incident_id": incident_id}
+            )
+
+# ===================== AI-POWERED INCIDENT ANALYSIS =====================
+
+@api_router.post("/ai/analyze-incident/{incident_id}")
+async def analyze_incident(incident_id: str, user: dict = Depends(get_current_user)):
+    """Analyze an incident using AI for risk assessment"""
+    from emergentintegrations.llm.chat import LlmChat, UserMessage
+    
+    incident = await db.incidents.find_one({"id": incident_id})
+    if not incident:
+        raise HTTPException(status_code=404, detail="Incident not found")
+    
+    # Get related data
+    pings = await db.location_pings.find({"incident_id": incident_id}).sort("timestamp", 1).to_list(100)
+    evidence = await db.evidence.find({"incident_id": incident_id}).to_list(50)
+    user_profile = await db.emergency_profiles.find_one({"email": incident.get("owner_email")})
+    
+    # Build context
+    context = f"""
+    Incident Type: {incident.get('incident_type', 'unknown')}
+    Severity: {incident.get('severity', 'unknown')}
+    Status: {incident.get('status', 'unknown')}
+    Duration: {incident.get('duration_minutes', 0)} minutes
+    Location Pings: {len(pings)}
+    Evidence Items: {len(evidence)}
+    Alerts Sent: {incident.get('alerts_sent_count', 0)}
+    Time: {incident.get('created_at', '')}
+    """
+    
+    if pings and len(pings) >= 2:
+        # Calculate movement
+        first_ping = pings[0]
+        last_ping = pings[-1]
+        if first_ping.get('latitude') and last_ping.get('latitude'):
+            lat1, lon1 = first_ping['latitude'], first_ping['longitude']
+            lat2, lon2 = last_ping['latitude'], last_ping['longitude']
+            # Haversine distance
+            R = 6371
+            dlat = math.radians(lat2 - lat1)
+            dlon = math.radians(lon2 - lon1)
+            a = math.sin(dlat/2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon/2)**2
+            c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+            distance = R * c
+            context += f"\nTotal movement during incident: {distance:.2f} km"
+    
+    try:
+        EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
+        if not EMERGENT_LLM_KEY:
+            raise HTTPException(status_code=500, detail="AI analysis not configured")
+        
+        chat = LlmChat(
+            api_key=EMERGENT_LLM_KEY,
+            session_id=f"incident-analysis-{incident_id}",
+            system_message="""You are a safety analyst for TRACEGUARD emergency response system. 
+            Analyze incident data and provide:
+            1. Risk Assessment (Low/Medium/High/Critical)
+            2. Key Observations
+            3. Recommended Actions
+            4. Pattern Insights
+            Be concise and actionable. Format as JSON with keys: risk_level, observations, recommendations, patterns"""
+        ).with_model("openai", "gpt-5.2")
+        
+        message = UserMessage(text=f"Analyze this safety incident:\n{context}")
+        response = await chat.send_message(message)
+        
+        # Store analysis
+        analysis_doc = {
+            "id": str(uuid.uuid4()),
+            "incident_id": incident_id,
+            "analysis": response,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "analyzed_by": user["email"]
+        }
+        await db.incident_analyses.insert_one(analysis_doc)
+        
+        return {
+            "incident_id": incident_id,
+            "analysis": response,
+            "created_at": analysis_doc["created_at"]
+        }
+    except Exception as e:
+        logger.error(f"AI analysis error: {e}")
+        raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
+
+@api_router.get("/ai/area-risk")
+async def get_area_risk_assessment(
+    latitude: float,
+    longitude: float,
+    radius_km: float = 5.0,
+    user: dict = Depends(get_current_user)
+):
+    """Get AI-powered risk assessment for an area based on historical incidents"""
+    from emergentintegrations.llm.chat import LlmChat, UserMessage
+    
+    # Find incidents in the area
+    incidents = await db.incidents.find({
+        "latitude": {"$exists": True},
+        "longitude": {"$exists": True}
+    }).to_list(1000)
+    
+    # Filter by distance
+    nearby_incidents = []
+    for inc in incidents:
+        if inc.get('latitude') and inc.get('longitude'):
+            lat1, lon1 = latitude, longitude
+            lat2, lon2 = inc['latitude'], inc['longitude']
+            R = 6371
+            dlat = math.radians(lat2 - lat1)
+            dlon = math.radians(lon2 - lon1)
+            a = math.sin(dlat/2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon/2)**2
+            c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+            distance = R * c
+            if distance <= radius_km:
+                nearby_incidents.append({
+                    "type": inc.get("incident_type"),
+                    "severity": inc.get("severity"),
+                    "time": inc.get("created_at"),
+                    "distance_km": round(distance, 2)
+                })
+    
+    context = f"""
+    Location: {latitude}, {longitude}
+    Search Radius: {radius_km} km
+    Incidents Found: {len(nearby_incidents)}
+    
+    Recent Incidents in Area:
+    {nearby_incidents[:20]}
+    """
+    
+    try:
+        EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
+        if not EMERGENT_LLM_KEY:
+            return {
+                "risk_level": "unknown",
+                "message": "AI analysis not configured",
+                "incidents_count": len(nearby_incidents)
+            }
+        
+        chat = LlmChat(
+            api_key=EMERGENT_LLM_KEY,
+            session_id=f"area-risk-{latitude}-{longitude}",
+            system_message="""You are a safety analyst. Analyze area incident data and provide:
+            1. Overall Risk Level (Low/Medium/High)
+            2. Time-based patterns (if any)
+            3. Safety recommendations for this area
+            Be brief and practical. Format as JSON with keys: risk_level, patterns, recommendations"""
+        ).with_model("openai", "gpt-5.2")
+        
+        message = UserMessage(text=f"Analyze safety risk for this area:\n{context}")
+        response = await chat.send_message(message)
+        
+        return {
+            "latitude": latitude,
+            "longitude": longitude,
+            "radius_km": radius_km,
+            "incidents_count": len(nearby_incidents),
+            "analysis": response
+        }
+    except Exception as e:
+        logger.error(f"Area risk analysis error: {e}")
+        return {
+            "risk_level": "unknown",
+            "message": str(e),
+            "incidents_count": len(nearby_incidents)
+        }
 
 # ===================== UTILITY ENDPOINTS =====================
 
