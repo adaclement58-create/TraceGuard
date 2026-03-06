@@ -1,130 +1,239 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { 
-  MapPin, Phone, Hospital, Building2, Shield, Navigation, Compass, 
-  Loader2, Send, CheckCircle2, Map, Target, Users, AlertTriangle
+  Shield, Hospital, Building2, Navigation, Phone, Loader2, 
+  MapPin, Share2, Compass, Download, AlertTriangle, RefreshCw
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
-import { LocationMap } from '../components/LocationMap';
+import { MapContainer, TileLayer, Marker, Popup, Circle, useMap } from 'react-leaflet';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 
-// Nigerian emergency resources with coordinates
-const safetyPoints = {
-  police: [
-    { id: 'p1', name: 'Force Headquarters', phone: '112', type: 'Police HQ', lat: 9.0579, lng: 7.4951 },
-    { id: 'p2', name: 'Lagos State Police Command', phone: '199', type: 'State Command', lat: 6.4541, lng: 3.3947 },
-    { id: 'p3', name: 'Abuja Police Division', phone: '112', type: 'Division', lat: 9.0765, lng: 7.3986 },
-  ],
-  hospitals: [
-    { id: 'h1', name: 'National Hospital Abuja', phone: '09-4613715', type: 'General Hospital', lat: 9.0408, lng: 7.4942 },
-    { id: 'h2', name: 'Lagos University Teaching Hospital', phone: '01-7743541', type: 'Teaching Hospital', lat: 6.5177, lng: 3.3878 },
-    { id: 'h3', name: 'Ahmadu Bello University Teaching Hospital', phone: '069-550871', type: 'Teaching Hospital', lat: 11.1511, lng: 7.6508 },
-  ],
-  barracks: [
-    { id: 'b1', name: 'Mogadishu Barracks', phone: 'N/A', type: 'Military', lat: 9.0800, lng: 7.5300 },
-    { id: 'b2', name: 'Ikeja Cantonment', phone: 'N/A', type: 'Military', lat: 6.6018, lng: 3.3515 },
-    { id: 'b3', name: 'Bonny Camp', phone: 'N/A', type: 'Military', lat: 6.4350, lng: 3.4150 },
-  ]
+// Fix Leaflet default marker icons
+delete L.Icon.Default.prototype._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
+  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
+  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+});
+
+// Custom marker icons
+const createIcon = (color) => L.divIcon({
+  className: 'custom-marker',
+  html: `<div style="background-color: ${color}; width: 24px; height: 24px; border-radius: 50%; border: 3px solid white; box-shadow: 0 2px 5px rgba(0,0,0,0.3);"></div>`,
+  iconSize: [24, 24],
+  iconAnchor: [12, 12],
+});
+
+const userIcon = createIcon('#10b981');
+const policeIcon = createIcon('#3b82f6');
+const hospitalIcon = createIcon('#ef4444');
+const barracksIcon = createIcon('#22c55e');
+
+// Place type configurations
+const PLACE_TYPES = {
+  police: { 
+    label: 'Police', 
+    icon: Shield, 
+    markerIcon: policeIcon,
+    color: 'blue',
+    amenity: 'police',
+    keyword: 'police station'
+  },
+  hospital: { 
+    label: 'Hospital', 
+    icon: Hospital, 
+    markerIcon: hospitalIcon,
+    color: 'red',
+    amenity: 'hospital',
+    keyword: 'hospital'
+  },
+  barracks: { 
+    label: 'Barracks', 
+    icon: Building2, 
+    markerIcon: barracksIcon,
+    color: 'green',
+    amenity: 'military',
+    keyword: 'military barracks'
+  }
 };
 
-const emergencyNumbers = [
-  { name: 'National Emergency', phone: '112', icon: Phone },
-  { name: 'Police Emergency', phone: '199', icon: Shield },
-  { name: 'Fire Service', phone: '193', icon: Building2 },
-  { name: 'FRSC (Road Safety)', phone: '122', icon: Navigation },
-  { name: 'Lagos Ambulance', phone: '767', icon: Hospital },
-];
+// Map center component
+function MapCenterUpdater({ center }) {
+  const map = useMap();
+  useEffect(() => {
+    if (center) {
+      map.setView([center.lat, center.lng], 13);
+    }
+  }, [center, map]);
+  return null;
+}
 
 const FindSafety = () => {
-  const { api } = useAuth();
-  const [userLocation, setUserLocation] = useState(null);
-  const [heading, setHeading] = useState(null);
+  const { userLocation, api } = useAuth();
   const [loading, setLoading] = useState(true);
-  const [selectedCategory, setSelectedCategory] = useState('all');
-  const [nearestPoints, setNearestPoints] = useState([]);
-  const [sendingLocation, setSendingLocation] = useState(false);
-  const [locationSent, setLocationSent] = useState(false);
-  const [contacts, setContacts] = useState([]);
-  const [zones, setZones] = useState([]);
+  const [currentLocation, setCurrentLocation] = useState(null);
+  const [selectedCategory, setSelectedCategory] = useState('police');
+  const [nearbyPlaces, setNearbyPlaces] = useState([]);
+  const [selectedPlace, setSelectedPlace] = useState(null);
+  const [compassHeading, setCompassHeading] = useState(0);
+  const [compassSupported, setCompassSupported] = useState(false);
+  const [sharingLocation, setSharingLocation] = useState(false);
+  const [searchingPlaces, setSearchingPlaces] = useState(false);
+  const [cachedAreas, setCachedAreas] = useState([]);
 
-  // Get user location
+  // Get current location
   useEffect(() => {
-    if (navigator.geolocation) {
+    if (userLocation) {
+      setCurrentLocation({
+        lat: userLocation.latitude,
+        lng: userLocation.longitude
+      });
+      setLoading(false);
+    } else if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          setUserLocation({
-            latitude: pos.coords.latitude,
-            longitude: pos.coords.longitude,
-            accuracy: pos.coords.accuracy
+        (position) => {
+          setCurrentLocation({
+            lat: position.coords.latitude,
+            lng: position.coords.longitude
           });
           setLoading(false);
         },
         (error) => {
           console.error('Location error:', error);
+          // Default to Lagos
+          setCurrentLocation({ lat: 6.5244, lng: 3.3792 });
           setLoading(false);
         },
         { enableHighAccuracy: true, timeout: 10000 }
       );
-    } else {
-      setLoading(false);
     }
-
-    // Compass heading
-    if ('DeviceOrientationEvent' in window) {
-      const handleOrientation = (event) => {
-        if (event.webkitCompassHeading) {
-          setHeading(event.webkitCompassHeading);
-        } else if (event.alpha) {
-          setHeading(360 - event.alpha);
-        }
-      };
-      window.addEventListener('deviceorientation', handleOrientation);
-      return () => window.removeEventListener('deviceorientation', handleOrientation);
-    }
-  }, []);
-
-  // Fetch contacts and zones
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const [contactsRes, zonesRes] = await Promise.all([
-          api.get('/contacts').catch(() => ({ data: [] })),
-          api.get('/safe-zones').catch(() => ({ data: [] }))
-        ]);
-        setContacts(contactsRes.data || []);
-        setZones(zonesRes.data || []);
-      } catch (error) {
-        console.error('Error fetching data:', error);
-      }
-    };
-    fetchData();
-  }, [api]);
-
-  // Calculate nearest safety points
-  useEffect(() => {
-    if (!userLocation) return;
-
-    const allPoints = [
-      ...safetyPoints.police.map(p => ({ ...p, category: 'police' })),
-      ...safetyPoints.hospitals.map(p => ({ ...p, category: 'hospital' })),
-      ...safetyPoints.barracks.map(p => ({ ...p, category: 'barracks' }))
-    ];
-
-    const withDistances = allPoints.map(point => ({
-      ...point,
-      distance: calculateDistance(
-        userLocation.latitude, userLocation.longitude,
-        point.lat, point.lng
-      ),
-      bearing: calculateBearing(
-        userLocation.latitude, userLocation.longitude,
-        point.lat, point.lng
-      )
-    }));
-
-    withDistances.sort((a, b) => a.distance - b.distance);
-    setNearestPoints(withDistances);
   }, [userLocation]);
 
+  // Initialize compass with device orientation
+  useEffect(() => {
+    const handleOrientation = (event) => {
+      let heading = 0;
+      
+      if (event.webkitCompassHeading !== undefined) {
+        // iOS
+        heading = event.webkitCompassHeading;
+      } else if (event.alpha !== null) {
+        // Android - alpha is the compass direction
+        heading = 360 - event.alpha;
+      }
+      
+      setCompassHeading(Math.round(heading));
+      setCompassSupported(true);
+    };
+
+    // Check if device orientation is available
+    if (window.DeviceOrientationEvent) {
+      // iOS 13+ requires permission
+      if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+        setCompassSupported(false);
+      } else {
+        window.addEventListener('deviceorientationabsolute', handleOrientation, true);
+        window.addEventListener('deviceorientation', handleOrientation, true);
+        setCompassSupported(true);
+      }
+    }
+
+    return () => {
+      window.removeEventListener('deviceorientationabsolute', handleOrientation, true);
+      window.removeEventListener('deviceorientation', handleOrientation, true);
+    };
+  }, []);
+
+  // Request compass permission (iOS)
+  const requestCompassPermission = async () => {
+    if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+      try {
+        const permission = await DeviceOrientationEvent.requestPermission();
+        if (permission === 'granted') {
+          window.addEventListener('deviceorientation', (event) => {
+            let heading = event.webkitCompassHeading || (360 - event.alpha) || 0;
+            setCompassHeading(Math.round(heading));
+            setCompassSupported(true);
+          }, true);
+        }
+      } catch (error) {
+        console.error('Compass permission error:', error);
+        alert('Could not enable compass. Please check device settings.');
+      }
+    }
+  };
+
+  // Search nearby places using OpenStreetMap Overpass API
+  const searchNearbyPlaces = useCallback(async (category) => {
+    if (!currentLocation) return;
+    
+    setSearchingPlaces(true);
+    const config = PLACE_TYPES[category];
+    
+    // Build Overpass query
+    let amenityQuery = '';
+    if (category === 'barracks') {
+      amenityQuery = `node[military](around:15000,${currentLocation.lat},${currentLocation.lng});
+                      way[military](around:15000,${currentLocation.lat},${currentLocation.lng});
+                      node[landuse=military](around:15000,${currentLocation.lat},${currentLocation.lng});
+                      way[landuse=military](around:15000,${currentLocation.lat},${currentLocation.lng});`;
+    } else {
+      amenityQuery = `node[amenity=${config.amenity}](around:10000,${currentLocation.lat},${currentLocation.lng});
+                      way[amenity=${config.amenity}](around:10000,${currentLocation.lat},${currentLocation.lng});`;
+    }
+
+    const query = `
+      [out:json][timeout:25];
+      (
+        ${amenityQuery}
+      );
+      out center;
+    `;
+
+    try {
+      const response = await fetch('https://overpass-api.de/api/interpreter', {
+        method: 'POST',
+        body: query
+      });
+      const data = await response.json();
+      
+      const places = data.elements
+        .map((el, index) => {
+          const lat = el.lat || el.center?.lat;
+          const lng = el.lon || el.center?.lon;
+          
+          if (!lat || !lng) return null;
+          
+          const distance = calculateDistance(currentLocation.lat, currentLocation.lng, lat, lng);
+          
+          return {
+            id: el.id || index,
+            name: el.tags?.name || `${config.label} ${index + 1}`,
+            address: el.tags?.['addr:street'] 
+              ? `${el.tags?.['addr:housenumber'] || ''} ${el.tags?.['addr:street']}`.trim()
+              : el.tags?.['addr:full'] || 'Address not available',
+            lat,
+            lng,
+            distance,
+            phone: el.tags?.phone || el.tags?.['contact:phone'],
+            website: el.tags?.website,
+            opening_hours: el.tags?.opening_hours
+          };
+        })
+        .filter(p => p !== null)
+        .sort((a, b) => a.distance - b.distance);
+      
+      setNearbyPlaces(places);
+    } catch (error) {
+      console.error('Search error:', error);
+      setNearbyPlaces([]);
+    } finally {
+      setSearchingPlaces(false);
+    }
+  }, [currentLocation]);
+
+  // Calculate distance between two points (Haversine)
   const calculateDistance = (lat1, lon1, lat2, lon2) => {
     const R = 6371000;
     const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -136,321 +245,422 @@ const FindSafety = () => {
     return R * c;
   };
 
-  const calculateBearing = (lat1, lon1, lat2, lon2) => {
-    const dLon = (lon2 - lon1) * Math.PI / 180;
-    const lat1Rad = lat1 * Math.PI / 180;
-    const lat2Rad = lat2 * Math.PI / 180;
-    const y = Math.sin(dLon) * Math.cos(lat2Rad);
-    const x = Math.cos(lat1Rad) * Math.sin(lat2Rad) - 
-              Math.sin(lat1Rad) * Math.cos(lat2Rad) * Math.cos(dLon);
-    const bearing = Math.atan2(y, x) * 180 / Math.PI;
-    return (bearing + 360) % 360;
-  };
-
+  // Format distance
   const formatDistance = (meters) => {
     if (meters < 1000) return `${Math.round(meters)}m`;
     return `${(meters / 1000).toFixed(1)}km`;
   };
 
-  const getDirectionName = (bearing) => {
-    const directions = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
-    const index = Math.round(bearing / 45) % 8;
-    return directions[index];
-  };
-
-  const getCategoryIcon = (category) => {
-    switch (category) {
-      case 'police': return <Shield className="w-5 h-5 text-blue-400" />;
-      case 'hospital': return <Hospital className="w-5 h-5 text-tg-danger" />;
-      case 'barracks': return <Building2 className="w-5 h-5 text-tg-warning" />;
-      default: return <MapPin className="w-5 h-5 text-zinc-400" />;
+  // Handle category change
+  useEffect(() => {
+    if (currentLocation) {
+      searchNearbyPlaces(selectedCategory);
     }
-  };
+  }, [selectedCategory, currentLocation, searchNearbyPlaces]);
 
-  const sendLocationToContacts = async () => {
-    if (!userLocation || contacts.length === 0) {
-      alert('No location or contacts available');
-      return;
-    }
-
-    setSendingLocation(true);
-    try {
-      // This would trigger the backend to send SMS with coordinates
-      const message = `My current location: https://www.google.com/maps?q=${userLocation.latitude},${userLocation.longitude}`;
-      
-      // Call test-alert endpoint which sends to all contacts
-      await api.post('/incidents/test-alert');
-      
-      setLocationSent(true);
-      setTimeout(() => setLocationSent(false), 5000);
-    } catch (error) {
-      console.error('Failed to send location:', error);
-      alert('Failed to send location. Please try again.');
-    } finally {
-      setSendingLocation(false);
-    }
-  };
-
-  const navigateToPoint = (point) => {
-    const url = `https://www.google.com/maps/dir/?api=1&destination=${point.lat},${point.lng}&travelmode=driving`;
+  // Navigate to place
+  const navigateToPlace = (place) => {
+    const url = `https://www.google.com/maps/dir/?api=1&destination=${place.lat},${place.lng}&travelmode=driving`;
     window.open(url, '_blank');
   };
 
-  const filteredPoints = selectedCategory === 'all' 
-    ? nearestPoints 
-    : nearestPoints.filter(p => p.category === selectedCategory);
+  // Call place
+  const callPlace = (phone) => {
+    window.location.href = `tel:${phone}`;
+  };
 
-  // Create map markers
-  const mapMarkers = [
-    ...(userLocation ? [{
-      id: 'user',
-      latitude: userLocation.latitude,
-      longitude: userLocation.longitude,
-      name: 'Your Location',
-      status: 'safe'
-    }] : []),
-    ...filteredPoints.slice(0, 10).map(point => ({
-      id: point.id,
-      latitude: point.lat,
-      longitude: point.lng,
-      name: point.name,
-      status: point.category === 'hospital' ? 'danger' : 
-              point.category === 'police' ? 'safe' : 'warning'
-    }))
-  ];
+  // Share location with trusted contacts
+  const shareLocationWithContacts = async () => {
+    setSharingLocation(true);
+    try {
+      const response = await api.get('/contacts');
+      const contacts = response.data;
+      
+      if (contacts.length === 0) {
+        alert('No trusted contacts found. Add contacts in Trusted Circle.');
+        return;
+      }
+
+      await api.post('/incidents/test-alert', {
+        message: `My current location: https://www.google.com/maps?q=${currentLocation.lat},${currentLocation.lng}`,
+        latitude: currentLocation.lat,
+        longitude: currentLocation.lng
+      });
+      
+      alert('Location shared with your trusted contacts!');
+    } catch (error) {
+      console.error('Share error:', error);
+      alert('Failed to share location. Please try again.');
+    } finally {
+      setSharingLocation(false);
+    }
+  };
+
+  // Download area for offline use
+  const downloadAreaForOffline = async () => {
+    if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+      const messageChannel = new MessageChannel();
+      
+      messageChannel.port1.onmessage = (event) => {
+        if (event.data.success) {
+          setCachedAreas(prev => [...prev, {
+            center: currentLocation,
+            name: 'Current Area',
+            timestamp: new Date().toISOString()
+          }]);
+          alert('Map tiles cached for offline use!');
+        } else {
+          alert('Failed to cache area: ' + (event.data.error || 'Unknown error'));
+        }
+      };
+
+      navigator.serviceWorker.controller.postMessage({
+        type: 'CACHE_MAP_AREA',
+        bounds: {
+          north: currentLocation.lat + 0.05,
+          south: currentLocation.lat - 0.05,
+          east: currentLocation.lng + 0.05,
+          west: currentLocation.lng - 0.05
+        },
+        zoom: 15
+      }, [messageChannel.port2]);
+    } else {
+      alert('Service worker not ready. Please refresh the page.');
+    }
+  };
+
+  // Get compass direction name
+  const getDirectionName = (heading) => {
+    if (heading >= 337.5 || heading < 22.5) return 'North';
+    if (heading >= 22.5 && heading < 67.5) return 'NE';
+    if (heading >= 67.5 && heading < 112.5) return 'East';
+    if (heading >= 112.5 && heading < 157.5) return 'SE';
+    if (heading >= 157.5 && heading < 202.5) return 'South';
+    if (heading >= 202.5 && heading < 247.5) return 'SW';
+    if (heading >= 247.5 && heading < 292.5) return 'West';
+    return 'NW';
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <div className="text-center">
+          <Loader2 className="w-8 h-8 animate-spin text-tg-safe mx-auto mb-4" />
+          <p className="text-zinc-500">Getting your location...</p>
+        </div>
+      </div>
+    );
+  }
+
+  const PlaceIcon = PLACE_TYPES[selectedCategory].icon;
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6" data-testid="find-safety-page">
+    <div className="space-y-6" data-testid="find-safety-page">
       {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold tg-heading tracking-tight flex items-center gap-3">
-          <Navigation className="w-7 h-7 text-tg-safe" />
-          Find Safety
-        </h1>
-        <p className="text-zinc-500 mt-1">Navigate to nearest safe locations</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold tg-heading tracking-tight flex items-center gap-3">
+            <Navigation className="w-7 h-7 text-tg-safe" />
+            Find Safety
+          </h1>
+          <p className="text-zinc-500 mt-1">Locate nearest emergency services</p>
+        </div>
+        
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={downloadAreaForOffline}
+          className="border-zinc-700"
+        >
+          <Download className="w-4 h-4 mr-2" />
+          Save Offline
+        </Button>
       </div>
 
-      {/* Send Location to Contacts */}
-      <div className="tg-card p-5 bg-tg-safe/5 border-tg-safe/30">
+      {/* Your Location & Share */}
+      <div className="tg-card p-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <Users className="w-6 h-6 text-tg-safe" />
+            <div className="w-10 h-10 rounded-full bg-tg-safe/20 flex items-center justify-center">
+              <MapPin className="w-5 h-5 text-tg-safe" />
+            </div>
             <div>
-              <p className="font-semibold text-tg-safe">Share Your Location</p>
-              <p className="text-sm text-zinc-400">
-                Send your coordinates to {contacts.length} trusted contacts
+              <p className="font-medium">Your Location</p>
+              <p className="text-xs text-zinc-500">
+                {currentLocation ? `${currentLocation.lat.toFixed(6)}, ${currentLocation.lng.toFixed(6)}` : 'Getting location...'}
               </p>
             </div>
           </div>
+          
           <Button
-            onClick={sendLocationToContacts}
-            disabled={sendingLocation || !userLocation || contacts.length === 0}
-            className={`${locationSent ? 'bg-tg-safe' : 'bg-tg-safe hover:bg-tg-safe/90'} text-black`}
-            data-testid="send-location-btn"
+            onClick={shareLocationWithContacts}
+            disabled={sharingLocation}
+            className="bg-tg-safe hover:bg-tg-safe/90 text-black"
+            data-testid="share-location-btn"
           >
-            {sendingLocation ? (
-              <Loader2 className="w-5 h-5 animate-spin" />
-            ) : locationSent ? (
-              <>
-                <CheckCircle2 className="w-5 h-5 mr-2" />
-                Sent!
-              </>
+            {sharingLocation ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
             ) : (
               <>
-                <Send className="w-5 h-5 mr-2" />
-                Send Location
+                <Share2 className="w-4 h-4 mr-2" />
+                Share Location
               </>
             )}
           </Button>
         </div>
       </div>
 
-      {/* Compass & GPS Row */}
-      <div className="grid gap-4 md:grid-cols-2">
-        {/* Compass Card */}
-        <div className="tg-card p-6">
-          <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-            <Compass className="w-5 h-5 text-blue-400" />
+      {/* Compass */}
+      <div className="tg-card p-4">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="font-semibold flex items-center gap-2">
+            <Compass className="w-5 h-5 text-zinc-400" />
             Compass
-          </h2>
-          <div className="flex flex-col items-center">
-            <div 
-              className="w-32 h-32 rounded-full border-4 border-zinc-700 relative flex items-center justify-center"
-              style={{ transform: heading !== null ? `rotate(${-heading}deg)` : 'none', transition: 'transform 0.3s ease' }}
+          </h3>
+          {!compassSupported && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={requestCompassPermission}
+              className="text-xs"
             >
-              <div className="absolute top-2 text-tg-danger font-bold text-sm">N</div>
-              <div className="absolute bottom-2 text-zinc-500 text-sm">S</div>
-              <div className="absolute left-2 text-zinc-500 text-sm">W</div>
-              <div className="absolute right-2 text-zinc-500 text-sm">E</div>
-              <div className="w-1 h-12 bg-gradient-to-b from-tg-danger to-zinc-600 rounded-full" />
-            </div>
-            <p className="text-zinc-500 text-sm mt-4">
-              {heading !== null ? `${Math.round(heading)}°` : 'Enable device orientation'}
-            </p>
-          </div>
-        </div>
-
-        {/* GPS Coordinates */}
-        <div className="tg-card p-6">
-          <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-            <Target className="w-5 h-5 text-tg-warning" />
-            Your Coordinates
-          </h2>
-          {loading ? (
-            <div className="flex items-center justify-center h-32">
-              <Loader2 className="w-8 h-8 animate-spin text-zinc-500" />
-            </div>
-          ) : userLocation ? (
-            <div className="space-y-3">
-              <div className="p-3 bg-zinc-800/50 rounded-lg font-mono text-sm">
-                <span className="text-zinc-500">Lat: </span>
-                <span className="text-tg-safe">{userLocation.latitude.toFixed(6)}</span>
-              </div>
-              <div className="p-3 bg-zinc-800/50 rounded-lg font-mono text-sm">
-                <span className="text-zinc-500">Lng: </span>
-                <span className="text-tg-safe">{userLocation.longitude.toFixed(6)}</span>
-              </div>
-              <p className="text-xs text-zinc-500">Accuracy: ±{Math.round(userLocation.accuracy)}m</p>
-            </div>
-          ) : (
-            <p className="text-zinc-500 text-center py-8">Location unavailable</p>
+              Enable Compass
+            </Button>
           )}
+        </div>
+        
+        <div className="flex items-center justify-center">
+          <div className="relative w-32 h-32">
+            {/* Compass background */}
+            <div className="absolute inset-0 rounded-full border-2 border-zinc-700 bg-zinc-800/50" />
+            
+            {/* Direction labels */}
+            <span className="absolute top-2 left-1/2 -translate-x-1/2 text-xs font-bold text-tg-danger">N</span>
+            <span className="absolute bottom-2 left-1/2 -translate-x-1/2 text-xs text-zinc-500">S</span>
+            <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-zinc-500">W</span>
+            <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-zinc-500">E</span>
+            
+            {/* Compass needle */}
+            <div 
+              className="absolute inset-4 flex items-center justify-center transition-transform duration-300"
+              style={{ transform: `rotate(${compassHeading}deg)` }}
+            >
+              <div className="w-1 h-full bg-gradient-to-b from-tg-danger to-zinc-600 rounded-full" />
+            </div>
+            
+            {/* Center dot */}
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-3 h-3 rounded-full bg-zinc-600" />
+          </div>
+          
+          <div className="ml-6 text-center">
+            <p className="text-3xl font-bold">{compassHeading}°</p>
+            <p className="text-sm text-zinc-500">{getDirectionName(compassHeading)}</p>
+            {!compassSupported && (
+              <p className="text-xs text-zinc-600 mt-1">Tap "Enable" on mobile</p>
+            )}
+          </div>
         </div>
       </div>
 
       {/* Category Filter */}
-      <div className="flex gap-2 p-1 bg-zinc-900 rounded-xl overflow-x-auto">
-        {[
-          { id: 'all', label: 'All', icon: MapPin },
-          { id: 'police', label: 'Police', icon: Shield },
-          { id: 'hospital', label: 'Hospitals', icon: Hospital },
-          { id: 'barracks', label: 'Barracks', icon: Building2 }
-        ].map((cat) => (
-          <button
-            key={cat.id}
-            onClick={() => setSelectedCategory(cat.id)}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-sm transition-colors whitespace-nowrap ${
-              selectedCategory === cat.id
-                ? 'bg-zinc-800 text-white'
-                : 'text-zinc-500 hover:text-white'
-            }`}
-            data-testid={`filter-${cat.id}`}
-          >
-            <cat.icon className="w-4 h-4" />
-            {cat.label}
-          </button>
-        ))}
+      <div className="flex gap-2">
+        {Object.entries(PLACE_TYPES).map(([key, config]) => {
+          const Icon = config.icon;
+          const isActive = selectedCategory === key;
+          return (
+            <button
+              key={key}
+              onClick={() => setSelectedCategory(key)}
+              className={`flex-1 p-3 rounded-xl border transition-all ${
+                isActive 
+                  ? 'bg-tg-safe/20 border-tg-safe/50 text-tg-safe' 
+                  : 'bg-zinc-800/50 border-zinc-700 text-zinc-400 hover:border-zinc-600'
+              }`}
+              data-testid={`filter-${key}`}
+            >
+              <Icon className="w-5 h-5 mx-auto mb-1" />
+              <p className="text-xs font-medium">{config.label}</p>
+            </button>
+          );
+        })}
       </div>
 
-      {/* Offline Map */}
-      {userLocation && (
-        <div className="tg-card p-4">
-          <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-            <Map className="w-5 h-5 text-blue-400" />
-            Safety Map
-          </h2>
-          <LocationMap
-            center={[userLocation.latitude, userLocation.longitude]}
-            zoom={12}
-            markers={mapMarkers}
-            zones={zones}
-            height="350px"
-          />
-          <p className="text-xs text-zinc-500 mt-2 text-center">
-            Tap markers for details • Blue = Police • Red = Hospital • Yellow = Military
-          </p>
+      {/* Map */}
+      {currentLocation && (
+        <div className="tg-card p-2 overflow-hidden" style={{ height: '320px' }}>
+          <MapContainer
+            center={[currentLocation.lat, currentLocation.lng]}
+            zoom={13}
+            style={{ height: '300px', width: '100%', borderRadius: '12px' }}
+            zoomControl={true}
+          >
+            <TileLayer
+              attribution='&copy; <a href="https://carto.com/">CARTO</a>'
+              url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+            />
+            <MapCenterUpdater center={currentLocation} />
+            
+            {/* User location marker */}
+            <Marker position={[currentLocation.lat, currentLocation.lng]} icon={userIcon}>
+              <Popup>
+                <div className="text-center">
+                  <strong>You are here</strong>
+                </div>
+              </Popup>
+            </Marker>
+            
+            {/* Nearby places markers */}
+            {nearbyPlaces.map((place) => (
+              <Marker
+                key={place.id}
+                position={[place.lat, place.lng]}
+                icon={PLACE_TYPES[selectedCategory].markerIcon}
+                eventHandlers={{
+                  click: () => setSelectedPlace(place)
+                }}
+              >
+                <Popup>
+                  <div className="p-1">
+                    <strong>{place.name}</strong>
+                    <p className="text-xs text-gray-600">{place.address}</p>
+                    <p className="text-xs text-gray-500">{formatDistance(place.distance)} away</p>
+                    <button
+                      onClick={() => navigateToPlace(place)}
+                      className="mt-1 text-xs text-blue-600 hover:underline"
+                    >
+                      Get Directions →
+                    </button>
+                  </div>
+                </Popup>
+              </Marker>
+            ))}
+          </MapContainer>
         </div>
       )}
 
-      {/* Nearest Safe Points */}
-      <div className="tg-card p-6">
-        <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-          <Navigation className="w-5 h-5 text-tg-safe" />
-          Nearest Safe Locations
-        </h2>
+      {/* Nearby Places List */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="font-semibold flex items-center gap-2">
+            <PlaceIcon className="w-5 h-5 text-zinc-400" />
+            Nearest {PLACE_TYPES[selectedCategory].label}s
+            {searchingPlaces && <Loader2 className="w-4 h-4 animate-spin ml-2" />}
+          </h3>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => searchNearbyPlaces(selectedCategory)}
+            disabled={searchingPlaces}
+            className="text-xs"
+          >
+            <RefreshCw className={`w-3 h-3 mr-1 ${searchingPlaces ? 'animate-spin' : ''}`} />
+            Refresh
+          </Button>
+        </div>
         
-        {!userLocation ? (
-          <div className="text-center py-8 text-zinc-500">
-            <MapPin className="w-12 h-12 mx-auto mb-3 opacity-50" />
-            <p>Enable location to find nearby safe points</p>
+        {nearbyPlaces.length === 0 && !searchingPlaces ? (
+          <div className="tg-card p-6 text-center">
+            <AlertTriangle className="w-8 h-8 mx-auto mb-2 text-zinc-500" />
+            <p className="text-zinc-500">No {PLACE_TYPES[selectedCategory].label.toLowerCase()}s found nearby</p>
+            <p className="text-xs text-zinc-600 mt-1">Try a different category or check your location</p>
           </div>
-        ) : filteredPoints.length === 0 ? (
-          <p className="text-zinc-500 text-center py-8">No locations found</p>
         ) : (
-          <div className="space-y-3">
-            {filteredPoints.slice(0, 5).map((point) => (
-              <button
-                key={point.id}
-                onClick={() => navigateToPoint(point)}
-                className="w-full flex items-center gap-4 p-4 bg-zinc-800/50 rounded-xl hover:bg-zinc-800 transition-colors text-left"
-                data-testid={`navigate-${point.id}`}
+          <div className="space-y-2">
+            {nearbyPlaces.slice(0, 10).map((place, index) => (
+              <div 
+                key={place.id}
+                className={`tg-card p-4 hover:border-zinc-600 transition-colors cursor-pointer ${
+                  selectedPlace?.id === place.id ? 'border-tg-safe/50' : ''
+                }`}
+                onClick={() => setSelectedPlace(place)}
+                data-testid={`place-${index}`}
               >
-                <div className="p-3 bg-zinc-700 rounded-lg">
-                  {getCategoryIcon(point.category)}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-semibold truncate">{point.name}</p>
-                  <p className="text-sm text-zinc-500">{point.type}</p>
-                  {point.phone !== 'N/A' && (
-                    <p className="text-xs text-zinc-600">{point.phone}</p>
-                  )}
-                </div>
-                <div className="text-right">
-                  <p className="font-bold text-tg-safe">{formatDistance(point.distance)}</p>
-                  <div className="flex items-center gap-1 text-sm text-zinc-500">
-                    <Navigation 
-                      className="w-4 h-4" 
-                      style={{ transform: `rotate(${point.bearing}deg)` }}
-                    />
-                    <span>{getDirectionName(point.bearing)}</span>
+                <div className="flex items-start justify-between">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs bg-zinc-700 text-zinc-300 px-2 py-0.5 rounded">
+                        #{index + 1}
+                      </span>
+                      <h4 className="font-medium">{place.name}</h4>
+                    </div>
+                    <p className="text-sm text-zinc-500 mt-1">{place.address}</p>
+                    <div className="flex items-center gap-3 mt-2 text-xs text-zinc-500">
+                      <span className="flex items-center gap-1">
+                        <MapPin className="w-3 h-3" />
+                        {formatDistance(place.distance)}
+                      </span>
+                      {place.opening_hours && (
+                        <span className="text-zinc-600">{place.opening_hours}</span>
+                      )}
+                    </div>
+                  </div>
+                  
+                  <div className="flex gap-2 ml-4">
+                    {place.phone && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-8 w-8 p-0 border-zinc-700"
+                        onClick={(e) => { e.stopPropagation(); callPlace(place.phone); }}
+                      >
+                        <Phone className="w-4 h-4" />
+                      </Button>
+                    )}
+                    <Button
+                      size="sm"
+                      className="h-8 bg-tg-safe hover:bg-tg-safe/90 text-black"
+                      onClick={(e) => { e.stopPropagation(); navigateToPlace(place); }}
+                    >
+                      <Navigation className="w-4 h-4 mr-1" />
+                      Go
+                    </Button>
                   </div>
                 </div>
-              </button>
+              </div>
             ))}
           </div>
         )}
       </div>
 
-      {/* Emergency Numbers */}
-      <div className="tg-card p-6">
-        <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-          <Phone className="w-5 h-5 text-tg-danger" />
+      {/* Emergency Hotlines */}
+      <div className="tg-card p-4 bg-tg-danger/10 border-tg-danger/30">
+        <h3 className="font-semibold text-tg-danger mb-3 flex items-center gap-2">
+          <Phone className="w-5 h-5" />
           Emergency Hotlines
-        </h2>
-        <div className="grid gap-3 md:grid-cols-2">
-          {emergencyNumbers.map((item, index) => (
-            <a
-              key={index}
-              href={`tel:${item.phone}`}
-              className="flex items-center justify-between p-4 bg-zinc-800/50 rounded-xl hover:bg-zinc-800 transition-colors"
-              data-testid={`call-${item.phone}`}
-            >
-              <div className="flex items-center gap-3">
-                <item.icon className="w-5 h-5 text-tg-danger" />
-                <span className="font-medium">{item.name}</span>
-              </div>
-              <span className="text-tg-safe font-mono font-bold">{item.phone}</span>
-            </a>
-          ))}
+        </h3>
+        <div className="grid grid-cols-3 gap-2">
+          <a href="tel:112" className="p-3 bg-zinc-800/50 rounded-xl text-center hover:bg-zinc-700/50 transition-colors">
+            <p className="text-lg font-bold">112</p>
+            <p className="text-xs text-zinc-500">Emergency</p>
+          </a>
+          <a href="tel:199" className="p-3 bg-zinc-800/50 rounded-xl text-center hover:bg-zinc-700/50 transition-colors">
+            <p className="text-lg font-bold">199</p>
+            <p className="text-xs text-zinc-500">Police</p>
+          </a>
+          <a href="tel:767" className="p-3 bg-zinc-800/50 rounded-xl text-center hover:bg-zinc-700/50 transition-colors">
+            <p className="text-lg font-bold">767</p>
+            <p className="text-xs text-zinc-500">LASEMA</p>
+          </a>
         </div>
       </div>
 
-      {/* Safety Tips */}
-      <div className="tg-card p-4 bg-tg-warning/5 border-tg-warning/20">
-        <div className="flex gap-3">
-          <AlertTriangle className="w-5 h-5 text-tg-warning flex-shrink-0 mt-0.5" />
-          <div>
-            <p className="font-medium text-tg-warning mb-2">Safety Tips</p>
-            <ul className="text-sm text-zinc-400 space-y-1">
-              <li>• Stay calm and assess your surroundings</li>
-              <li>• Move to a well-lit, populated area if possible</li>
-              <li>• Keep your phone charged and accessible</li>
-              <li>• If in immediate danger, call 112 first</li>
-              <li>• Share your location with trusted contacts</li>
-            </ul>
+      {/* Offline Areas */}
+      {cachedAreas.length > 0 && (
+        <div className="tg-card p-4">
+          <h3 className="font-semibold mb-2 flex items-center gap-2">
+            <Download className="w-5 h-5 text-zinc-400" />
+            Offline Areas ({cachedAreas.length})
+          </h3>
+          <div className="space-y-2">
+            {cachedAreas.map((area, index) => (
+              <div key={index} className="text-sm text-zinc-500 flex items-center justify-between p-2 bg-zinc-800/30 rounded">
+                <span>{area.name}</span>
+                <span className="text-xs text-tg-safe">✓ Cached</span>
+              </div>
+            ))}
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 };

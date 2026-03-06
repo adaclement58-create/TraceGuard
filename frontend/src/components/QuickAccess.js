@@ -1,30 +1,17 @@
-import React, { useState, useEffect } from 'react';
-import { Shield, Hospital, Navigation, Phone, Loader2, MapPin, ExternalLink } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Shield, Hospital, Navigation, Phone, Loader2, MapPin, Building2 } from 'lucide-react';
 import { Button } from './ui/button';
+import { useAuth } from '../context/AuthContext';
 
-// Nigerian emergency resources with coordinates
-const SAFETY_POINTS = {
-  police: [
-    { id: 'p1', name: 'Force Headquarters', phone: '112', lat: 9.0579, lng: 7.4951, city: 'Abuja' },
-    { id: 'p2', name: 'Lagos State Police Command', phone: '199', lat: 6.4541, lng: 3.3947, city: 'Lagos' },
-    { id: 'p3', name: 'Abuja Police Division', phone: '112', lat: 9.0765, lng: 7.3986, city: 'Abuja' },
-    { id: 'p4', name: 'Port Harcourt Police', phone: '112', lat: 4.8156, lng: 7.0498, city: 'Port Harcourt' },
-    { id: 'p5', name: 'Kano Police Command', phone: '112', lat: 12.0022, lng: 8.5920, city: 'Kano' },
-  ],
-  hospitals: [
-    { id: 'h1', name: 'National Hospital Abuja', phone: '09-4613715', lat: 9.0408, lng: 7.4942, city: 'Abuja' },
-    { id: 'h2', name: 'Lagos University Teaching Hospital', phone: '01-7743541', lat: 6.5177, lng: 3.3878, city: 'Lagos' },
-    { id: 'h3', name: 'Ahmadu Bello University Teaching Hospital', phone: '069-550871', lat: 11.1511, lng: 7.6508, city: 'Zaria' },
-    { id: 'h4', name: 'University of Port Harcourt Teaching Hospital', phone: '084-230011', lat: 4.8960, lng: 6.9220, city: 'Port Harcourt' },
-    { id: 'h5', name: 'Lagos State Emergency', phone: '767', lat: 6.4281, lng: 3.4219, city: 'Lagos' },
-  ]
-};
+const GOOGLE_MAPS_API_KEY = process.env.REACT_APP_GOOGLE_MAPS_API_KEY;
 
 const QuickAccess = ({ className = '' }) => {
-  const [userLocation, setUserLocation] = useState(null);
+  const { userLocation } = useAuth();
   const [loading, setLoading] = useState(true);
   const [nearestPolice, setNearestPolice] = useState(null);
   const [nearestHospital, setNearestHospital] = useState(null);
+  const [nearestBarracks, setNearestBarracks] = useState(null);
+  const [error, setError] = useState(null);
 
   // Calculate distance between two coordinates (Haversine formula)
   const calculateDistance = (lat1, lon1, lat2, lon2) => {
@@ -44,55 +31,225 @@ const QuickAccess = ({ className = '' }) => {
     return `${(meters / 1000).toFixed(1)}km`;
   };
 
-  // Find nearest locations
-  useEffect(() => {
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          const { latitude, longitude } = position.coords;
-          setUserLocation({ latitude, longitude });
-          
-          // Find nearest police station
-          let minPoliceDistance = Infinity;
-          let closestPolice = null;
-          
-          for (const station of SAFETY_POINTS.police) {
-            const distance = calculateDistance(latitude, longitude, station.lat, station.lng);
-            if (distance < minPoliceDistance) {
-              minPoliceDistance = distance;
-              closestPolice = { ...station, distance };
-            }
-          }
-          setNearestPolice(closestPolice);
-          
-          // Find nearest hospital
-          let minHospitalDistance = Infinity;
-          let closestHospital = null;
-          
-          for (const hospital of SAFETY_POINTS.hospitals) {
-            const distance = calculateDistance(latitude, longitude, hospital.lat, hospital.lng);
-            if (distance < minHospitalDistance) {
-              minHospitalDistance = distance;
-              closestHospital = { ...hospital, distance };
-            }
-          }
-          setNearestHospital(closestHospital);
-          
-          setLoading(false);
-        },
-        (error) => {
-          console.error('Location error:', error);
-          // Use default locations (Lagos)
-          setNearestPolice({ ...SAFETY_POINTS.police[1], distance: null });
-          setNearestHospital({ ...SAFETY_POINTS.hospitals[1], distance: null });
-          setLoading(false);
-        },
-        { enableHighAccuracy: true, timeout: 10000 }
-      );
+  // Search for nearby places using Google Places API
+  const searchNearbyPlaces = useCallback(async (latitude, longitude) => {
+    // Load Google Maps script if not already loaded
+    if (!window.google || !window.google.maps) {
+      const script = document.createElement('script');
+      script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&libraries=places`;
+      script.async = true;
+      script.onload = () => searchWithGooglePlaces(latitude, longitude);
+      document.head.appendChild(script);
     } else {
-      setLoading(false);
+      searchWithGooglePlaces(latitude, longitude);
     }
   }, []);
+
+  const searchWithGooglePlaces = (latitude, longitude) => {
+    // Create a hidden map element for Places service
+    const mapDiv = document.createElement('div');
+    mapDiv.style.display = 'none';
+    document.body.appendChild(mapDiv);
+    
+    const map = new window.google.maps.Map(mapDiv, {
+      center: { lat: latitude, lng: longitude },
+      zoom: 15
+    });
+    
+    const service = new window.google.maps.places.PlacesService(map);
+    const location = new window.google.maps.LatLng(latitude, longitude);
+    
+    // Search for police
+    service.nearbySearch({
+      location,
+      radius: 10000,
+      keyword: 'police station'
+    }, (results, status) => {
+      if (status === window.google.maps.places.PlacesServiceStatus.OK && results.length > 0) {
+        const nearest = results.reduce((closest, place) => {
+          const distance = calculateDistance(
+            latitude, longitude,
+            place.geometry.location.lat(), place.geometry.location.lng()
+          );
+          if (!closest || distance < closest.distance) {
+            return {
+              name: place.name,
+              address: place.vicinity,
+              lat: place.geometry.location.lat(),
+              lng: place.geometry.location.lng(),
+              distance,
+              phone: '112' // Default emergency number
+            };
+          }
+          return closest;
+        }, null);
+        setNearestPolice(nearest);
+      }
+    });
+    
+    // Search for hospitals
+    service.nearbySearch({
+      location,
+      radius: 10000,
+      type: 'hospital'
+    }, (results, status) => {
+      if (status === window.google.maps.places.PlacesServiceStatus.OK && results.length > 0) {
+        const nearest = results.reduce((closest, place) => {
+          const distance = calculateDistance(
+            latitude, longitude,
+            place.geometry.location.lat(), place.geometry.location.lng()
+          );
+          if (!closest || distance < closest.distance) {
+            return {
+              name: place.name,
+              address: place.vicinity,
+              lat: place.geometry.location.lat(),
+              lng: place.geometry.location.lng(),
+              distance,
+              phone: '767' // Default emergency number
+            };
+          }
+          return closest;
+        }, null);
+        setNearestHospital(nearest);
+      }
+      setLoading(false);
+    });
+    
+    // Search for military/barracks
+    service.nearbySearch({
+      location,
+      radius: 15000,
+      keyword: 'military barracks army'
+    }, (results, status) => {
+      if (status === window.google.maps.places.PlacesServiceStatus.OK && results.length > 0) {
+        const nearest = results.reduce((closest, place) => {
+          const distance = calculateDistance(
+            latitude, longitude,
+            place.geometry.location.lat(), place.geometry.location.lng()
+          );
+          if (!closest || distance < closest.distance) {
+            return {
+              name: place.name,
+              address: place.vicinity,
+              lat: place.geometry.location.lat(),
+              lng: place.geometry.location.lng(),
+              distance
+            };
+          }
+          return closest;
+        }, null);
+        setNearestBarracks(nearest);
+      }
+    });
+    
+    // Clean up
+    setTimeout(() => {
+      document.body.removeChild(mapDiv);
+    }, 5000);
+  };
+
+  // Fallback to Overpass API
+  const searchWithOverpass = async (latitude, longitude) => {
+    try {
+      // Search for police
+      const policeQuery = `
+        [out:json][timeout:10];
+        node[amenity=police](around:10000,${latitude},${longitude});
+        out 1;
+      `;
+      
+      const policeRes = await fetch('https://overpass-api.de/api/interpreter', {
+        method: 'POST',
+        body: policeQuery
+      });
+      const policeData = await policeRes.json();
+      
+      if (policeData.elements.length > 0) {
+        const el = policeData.elements[0];
+        setNearestPolice({
+          name: el.tags?.name || 'Police Station',
+          address: el.tags?.['addr:street'] || 'Nearby',
+          lat: el.lat,
+          lng: el.lon,
+          distance: calculateDistance(latitude, longitude, el.lat, el.lon),
+          phone: el.tags?.phone || '112'
+        });
+      }
+
+      // Search for hospitals
+      const hospitalQuery = `
+        [out:json][timeout:10];
+        node[amenity=hospital](around:10000,${latitude},${longitude});
+        out 1;
+      `;
+      
+      const hospitalRes = await fetch('https://overpass-api.de/api/interpreter', {
+        method: 'POST',
+        body: hospitalQuery
+      });
+      const hospitalData = await hospitalRes.json();
+      
+      if (hospitalData.elements.length > 0) {
+        const el = hospitalData.elements[0];
+        setNearestHospital({
+          name: el.tags?.name || 'Hospital',
+          address: el.tags?.['addr:street'] || 'Nearby',
+          lat: el.lat,
+          lng: el.lon,
+          distance: calculateDistance(latitude, longitude, el.lat, el.lon),
+          phone: el.tags?.phone || '767'
+        });
+      }
+
+      setLoading(false);
+    } catch (error) {
+      console.error('Overpass API error:', error);
+      setError('Could not find nearby places');
+      setLoading(false);
+    }
+  };
+
+  // Get location and search for places
+  useEffect(() => {
+    const getLocationAndSearch = async () => {
+      let latitude, longitude;
+      
+      if (userLocation) {
+        latitude = userLocation.latitude;
+        longitude = userLocation.longitude;
+      } else if (navigator.geolocation) {
+        try {
+          const position = await new Promise((resolve, reject) => {
+            navigator.geolocation.getCurrentPosition(resolve, reject, {
+              enableHighAccuracy: true,
+              timeout: 10000
+            });
+          });
+          latitude = position.coords.latitude;
+          longitude = position.coords.longitude;
+        } catch (error) {
+          console.error('Location error:', error);
+          setError('Location access required');
+          setLoading(false);
+          return;
+        }
+      } else {
+        setError('Geolocation not supported');
+        setLoading(false);
+        return;
+      }
+
+      // Try Google Places first, fallback to Overpass
+      if (GOOGLE_MAPS_API_KEY) {
+        searchNearbyPlaces(latitude, longitude);
+      } else {
+        searchWithOverpass(latitude, longitude);
+      }
+    };
+
+    getLocationAndSearch();
+  }, [userLocation, searchNearbyPlaces]);
 
   // Navigate to location
   const navigateTo = (lat, lng) => {
@@ -111,6 +268,17 @@ const QuickAccess = ({ className = '' }) => {
         <div className="flex items-center justify-center py-4">
           <Loader2 className="w-6 h-6 animate-spin text-zinc-500" />
           <span className="ml-2 text-zinc-500">Finding nearest safety points...</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className={`tg-card p-4 ${className}`}>
+        <div className="text-center py-4 text-zinc-500">
+          <MapPin className="w-6 h-6 mx-auto mb-2" />
+          <p>{error}</p>
         </div>
       </div>
     );
@@ -142,7 +310,7 @@ const QuickAccess = ({ className = '' }) => {
               )}
             </div>
             <p className="text-sm font-medium truncate">{nearestPolice.name}</p>
-            <p className="text-xs text-zinc-500 mb-2">{nearestPolice.city}</p>
+            <p className="text-xs text-zinc-500 mb-2 truncate">{nearestPolice.address}</p>
             <div className="flex gap-2">
               <Button
                 size="sm"
@@ -183,7 +351,7 @@ const QuickAccess = ({ className = '' }) => {
               )}
             </div>
             <p className="text-sm font-medium truncate">{nearestHospital.name}</p>
-            <p className="text-xs text-zinc-500 mb-2">{nearestHospital.city}</p>
+            <p className="text-xs text-zinc-500 mb-2 truncate">{nearestHospital.address}</p>
             <div className="flex gap-2">
               <Button
                 size="sm"
@@ -206,6 +374,36 @@ const QuickAccess = ({ className = '' }) => {
           </div>
         )}
       </div>
+
+      {/* Nearest Barracks (if available) */}
+      {nearestBarracks && (
+        <div 
+          className="mt-3 p-3 bg-green-500/10 border border-green-500/20 rounded-xl"
+          data-testid="nearest-barracks"
+        >
+          <div className="flex items-start justify-between mb-2">
+            <div className="flex items-center gap-2">
+              <Building2 className="w-5 h-5 text-green-400" />
+              <span className="font-semibold text-green-400">Military/Barracks</span>
+            </div>
+            {nearestBarracks.distance && (
+              <span className="text-xs bg-green-500/20 text-green-400 px-2 py-0.5 rounded-full">
+                {formatDistance(nearestBarracks.distance)}
+              </span>
+            )}
+          </div>
+          <p className="text-sm font-medium truncate">{nearestBarracks.name}</p>
+          <p className="text-xs text-zinc-500 mb-2 truncate">{nearestBarracks.address}</p>
+          <Button
+            size="sm"
+            className="w-full h-8 text-xs bg-green-500 hover:bg-green-600 text-white"
+            onClick={() => navigateTo(nearestBarracks.lat, nearestBarracks.lng)}
+          >
+            <Navigation className="w-3 h-3 mr-1" />
+            Navigate
+          </Button>
+        </div>
+      )}
 
       {/* Emergency Numbers */}
       <div className="mt-3 pt-3 border-t border-zinc-800">
