@@ -170,9 +170,12 @@ const SafeZones = () => {
               Add Zone
             </Button>
           </DialogTrigger>
-          <DialogContent className="bg-zinc-900 border-zinc-800">
+          <DialogContent className="bg-zinc-900 border-zinc-800" aria-describedby="safe-zone-description">
             <DialogHeader>
               <DialogTitle>Create Safe Zone</DialogTitle>
+              <p id="safe-zone-description" className="text-sm text-zinc-500">
+                Define a geofenced area to receive automatic alerts
+              </p>
             </DialogHeader>
             <form onSubmit={handleCreateZone} className="space-y-4 pt-4">
               <div>
