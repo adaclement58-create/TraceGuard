@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { 
   Shield, Users, MapPin, AlertTriangle, FileVideo, 
   Home, Settings, Map, Building2, CreditCard, Menu, X,
-  ChevronRight, LogOut, ShieldAlert, Activity, Navigation, Compass
+  ChevronRight, ChevronLeft, LogOut, ShieldAlert, Activity, Navigation, Compass
 } from 'lucide-react';
 
 const navItems = [
@@ -16,9 +16,8 @@ const navItems = [
   { path: '/safe-zones', icon: Map, label: 'Safe Zones' },
   { path: '/find-safety', icon: Compass, label: 'Find Safety' },
   { path: '/family', icon: Users, label: 'Family Safety' },
-  { path: '/subscription', icon: CreditCard, label: 'Subscription' },
   { path: '/corporate', icon: Building2, label: 'Corporate' },
-  { path: '/settings', icon: Settings, label: 'Settings' },
+  { path: '/subscription', icon: CreditCard, label: 'Subscription' },
 ];
 
 const mobileNavItems = [
@@ -39,15 +38,21 @@ const Layout = ({ children }) => {
     navigate('/login');
   };
 
+  const handleBack = () => {
+    navigate(-1);
+  };
+
   const isActive = (path) => {
     if (path === '/') return location.pathname === '/';
     return location.pathname.startsWith(path);
   };
 
+  const showBackButton = location.pathname !== '/';
+
   return (
     <div className="min-h-screen bg-[#09090b]">
-      {/* Desktop Sidebar */}
-      <aside className="hidden lg:flex lg:fixed lg:inset-y-0 lg:left-0 lg:w-72 sidebar flex-col">
+      {/* Desktop Sidebar - RIGHT SIDE */}
+      <aside className="hidden lg:flex lg:fixed lg:inset-y-0 lg:right-0 lg:w-72 sidebar flex-col border-l border-zinc-800">
         <div className="flex flex-col h-full p-6">
           {/* Logo */}
           <Link to="/" className="flex items-center gap-3 mb-10">
@@ -73,13 +78,13 @@ const Layout = ({ children }) => {
                 }`}
               >
                 <Activity className="w-5 h-5" />
-                <span className="font-medium">Dashboard</span>
+                <span className="font-medium">Admin Dashboard</span>
               </Link>
             </div>
           )}
 
           {/* Navigation */}
-          <nav className="flex-1 space-y-1">
+          <nav className="flex-1 space-y-1 overflow-y-auto">
             <p className="tg-label mb-2 px-3">Navigation</p>
             {navItems.map((item) => (
               <Link
@@ -98,10 +103,23 @@ const Layout = ({ children }) => {
             ))}
           </nav>
 
-          {/* User Footer */}
-          <div className="pt-6 border-t border-zinc-800">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 rounded-full bg-zinc-800 flex items-center justify-center">
+          {/* Settings - At Bottom */}
+          <div className="pt-4 border-t border-zinc-800">
+            <Link
+              to="/settings"
+              className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all mb-4 ${
+                isActive('/settings')
+                  ? 'bg-tg-safe/10 text-tg-safe'
+                  : 'text-zinc-400 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <Settings className="w-5 h-5" />
+              <span className="font-medium">Settings</span>
+            </Link>
+
+            {/* User Footer */}
+            <div className="flex items-center gap-3 mb-4 p-3 bg-zinc-800/50 rounded-xl">
+              <div className="w-10 h-10 rounded-full bg-zinc-700 flex items-center justify-center">
                 <span className="text-sm font-semibold text-zinc-300">
                   {user?.full_name?.charAt(0)?.toUpperCase() || 'U'}
                 </span>
@@ -113,7 +131,8 @@ const Layout = ({ children }) => {
             </div>
             <button
               onClick={handleLogout}
-              className="flex items-center gap-2 w-full px-3 py-2 text-zinc-400 hover:text-tg-danger hover:bg-tg-danger/10 rounded-xl transition-all"
+              className="flex items-center gap-2 w-full px-3 py-2.5 text-zinc-400 hover:text-tg-danger hover:bg-tg-danger/10 rounded-xl transition-all"
+              data-testid="logout-btn"
             >
               <LogOut className="w-5 h-5" />
               <span className="font-medium">Logout</span>
@@ -125,12 +144,22 @@ const Layout = ({ children }) => {
       {/* Mobile Header */}
       <header className="lg:hidden fixed top-0 left-0 right-0 z-40 bg-[#09090b]/95 backdrop-blur-xl border-b border-zinc-800 safe-area-top">
         <div className="flex items-center justify-between px-4 py-3">
-          <Link to="/" className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-tg-safe to-emerald-600 flex items-center justify-center">
-              <ShieldAlert className="w-5 h-5 text-black" />
-            </div>
-            <span className="font-bold text-white tg-heading">TRACEGUARD</span>
-          </Link>
+          {showBackButton ? (
+            <button
+              onClick={handleBack}
+              className="p-2 text-zinc-400 hover:text-white rounded-lg"
+              data-testid="back-button"
+            >
+              <ChevronLeft className="w-6 h-6" />
+            </button>
+          ) : (
+            <Link to="/" className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-tg-safe to-emerald-600 flex items-center justify-center">
+                <ShieldAlert className="w-5 h-5 text-black" />
+              </div>
+              <span className="font-bold text-white tg-heading">TRACEGUARD</span>
+            </Link>
+          )}
           <button
             onClick={() => setSidebarOpen(true)}
             className="p-2 text-zinc-400 hover:text-white"
@@ -141,7 +170,7 @@ const Layout = ({ children }) => {
         </div>
       </header>
 
-      {/* Mobile Sidebar Overlay */}
+      {/* Mobile Sidebar Overlay - RIGHT SIDE */}
       {sidebarOpen && (
         <div className="lg:hidden fixed inset-0 z-50">
           <div className="absolute inset-0 bg-black/60" onClick={() => setSidebarOpen(false)} />
@@ -154,7 +183,23 @@ const Layout = ({ children }) => {
                 </button>
               </div>
 
-              <nav className="flex-1 space-y-1">
+              {/* Admin link for mobile */}
+              {user?.role === 'admin' && (
+                <Link
+                  to="/admin"
+                  onClick={() => setSidebarOpen(false)}
+                  className={`flex items-center gap-3 px-3 py-3 rounded-xl transition-all mb-2 ${
+                    isActive('/admin')
+                      ? 'bg-tg-safe/10 text-tg-safe'
+                      : 'text-zinc-400 hover:text-white hover:bg-white/5'
+                  }`}
+                >
+                  <Activity className="w-5 h-5" />
+                  <span className="font-medium">Admin Dashboard</span>
+                </Link>
+              )}
+
+              <nav className="flex-1 space-y-1 overflow-y-auto">
                 {navItems.map((item) => (
                   <Link
                     key={item.path}
@@ -170,37 +215,63 @@ const Layout = ({ children }) => {
                     <span className="font-medium">{item.label}</span>
                   </Link>
                 ))}
-                {user?.role === 'admin' && (
-                  <Link
-                    to="/admin"
-                    onClick={() => setSidebarOpen(false)}
-                    className={`flex items-center gap-3 px-3 py-3 rounded-xl transition-all ${
-                      isActive('/admin')
-                        ? 'bg-tg-safe/10 text-tg-safe'
-                        : 'text-zinc-400 hover:text-white hover:bg-white/5'
-                    }`}
-                  >
-                    <Activity className="w-5 h-5" />
-                    <span className="font-medium">Admin Dashboard</span>
-                  </Link>
-                )}
               </nav>
 
-              <button
-                onClick={handleLogout}
-                className="flex items-center gap-2 px-3 py-3 text-zinc-400 hover:text-tg-danger hover:bg-tg-danger/10 rounded-xl transition-all mt-4"
-              >
-                <LogOut className="w-5 h-5" />
-                <span className="font-medium">Logout</span>
-              </button>
+              {/* Settings at bottom of mobile menu */}
+              <div className="pt-4 border-t border-zinc-800">
+                <Link
+                  to="/settings"
+                  onClick={() => setSidebarOpen(false)}
+                  className={`flex items-center gap-3 px-3 py-3 rounded-xl transition-all mb-4 ${
+                    isActive('/settings')
+                      ? 'bg-tg-safe/10 text-tg-safe'
+                      : 'text-zinc-400 hover:text-white hover:bg-white/5'
+                  }`}
+                >
+                  <Settings className="w-5 h-5" />
+                  <span className="font-medium">Settings</span>
+                </Link>
+
+                {/* User info */}
+                <div className="flex items-center gap-3 mb-4 p-3 bg-zinc-800/50 rounded-xl">
+                  <div className="w-10 h-10 rounded-full bg-zinc-700 flex items-center justify-center">
+                    <span className="text-sm font-semibold text-zinc-300">
+                      {user?.full_name?.charAt(0)?.toUpperCase() || 'U'}
+                    </span>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-white truncate">{user?.full_name}</p>
+                    <p className="text-xs text-zinc-500 truncate">{user?.email}</p>
+                  </div>
+                </div>
+
+                <button
+                  onClick={handleLogout}
+                  className="flex items-center gap-2 w-full px-3 py-3 text-zinc-400 hover:text-tg-danger hover:bg-tg-danger/10 rounded-xl transition-all"
+                >
+                  <LogOut className="w-5 h-5" />
+                  <span className="font-medium">Logout</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* Main Content */}
-      <main className="lg:pl-72 min-h-screen pb-20 lg:pb-0 pt-16 lg:pt-0">
+      {/* Main Content - Adjusted for right sidebar */}
+      <main className="lg:pr-72 min-h-screen pb-20 lg:pb-0 pt-16 lg:pt-0">
         <div className="p-4 lg:p-8">
+          {/* Desktop Back Button */}
+          {showBackButton && (
+            <button
+              onClick={handleBack}
+              className="hidden lg:flex items-center gap-2 text-zinc-400 hover:text-white mb-4 transition-colors"
+              data-testid="desktop-back-btn"
+            >
+              <ChevronLeft className="w-5 h-5" />
+              <span>Back</span>
+            </button>
+          )}
           {children}
         </div>
       </main>

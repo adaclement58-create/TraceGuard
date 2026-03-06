@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { Map, Plus, Trash2, Home, Building2, GraduationCap, MapPin, Loader2, Power } from 'lucide-react';
+import { Map, Plus, Trash2, Home, Building2, GraduationCap, MapPin, Loader2, Power, CheckCircle2 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
 import { Input } from '../components/ui/input';
 import { Button } from '../components/ui/button';
@@ -207,22 +207,24 @@ const SafeZones = () => {
                 <label className="block text-sm font-medium text-zinc-400 mb-2">Location *</label>
                 <Button
                   type="button"
-                  variant="outline"
-                  className="w-full"
+                  variant={newZone.latitude ? "default" : "outline"}
+                  className={`w-full ${newZone.latitude ? 'bg-tg-safe hover:bg-tg-safe/90 text-black' : ''}`}
                   onClick={getCurrentLocation}
                   disabled={gettingLocation}
                   data-testid="get-location-btn"
                 >
                   {gettingLocation ? (
                     <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  ) : newZone.latitude ? (
+                    <CheckCircle2 className="w-4 h-4 mr-2" />
                   ) : (
                     <MapPin className="w-4 h-4 mr-2" />
                   )}
-                  {newZone.latitude ? 'Location Set' : 'Use Current Location'}
+                  {newZone.latitude ? 'Location Set ✓' : 'Use Current Location'}
                 </Button>
                 {newZone.latitude && (
-                  <p className="text-xs text-zinc-500 mt-2">
-                    {newZone.latitude.toFixed(6)}, {newZone.longitude.toFixed(6)}
+                  <p className="text-xs text-tg-safe mt-2">
+                    📍 {newZone.latitude.toFixed(6)}, {newZone.longitude.toFixed(6)}
                   </p>
                 )}
               </div>
