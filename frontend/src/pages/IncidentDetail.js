@@ -3,6 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import { useParams, Link } from 'react-router-dom';
 import { AlertTriangle, Clock, MapPin, ChevronLeft, FileVideo, Radio, Image, Activity } from 'lucide-react';
 import { format } from 'date-fns';
+import { IncidentMap } from '../components/LocationMap';
 
 const IncidentDetail = () => {
   const { api, user } = useAuth();
@@ -133,28 +134,26 @@ const IncidentDetail = () => {
         </div>
       </div>
 
-      {/* Location */}
+      {/* Location Map */}
       {incident.last_known_lat && (
         <div className="tg-card p-6">
           <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
             <MapPin className="w-5 h-5 text-tg-warning" />
-            Last Known Location
+            Live Location Map
           </h2>
-          <div className="h-64 bg-zinc-800 rounded-xl flex items-center justify-center">
-            <div className="text-center">
-              <MapPin className="w-12 h-12 mx-auto mb-3 text-zinc-600" />
-              <p className="text-sm text-zinc-400">
-                {incident.last_known_lat.toFixed(6)}, {incident.last_known_lng.toFixed(6)}
-              </p>
-              <a
-                href={`https://www.google.com/maps?q=${incident.last_known_lat},${incident.last_known_lng}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-tg-safe text-sm hover:underline mt-2 inline-block"
-              >
-                Open in Google Maps
-              </a>
-            </div>
+          <IncidentMap 
+            incident={incident} 
+            pings={incident.location_pings || []} 
+          />
+          <div className="mt-3 text-center">
+            <a
+              href={`https://www.google.com/maps?q=${incident.last_known_lat},${incident.last_known_lng}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-tg-safe text-sm hover:underline"
+            >
+              Open in Google Maps
+            </a>
           </div>
         </div>
       )}

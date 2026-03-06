@@ -4,6 +4,7 @@ import { Users, MapPin, AlertTriangle, Plus, X, Lock, Loader2 } from 'lucide-rea
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
 import { Input } from '../components/ui/input';
 import { Button } from '../components/ui/button';
+import { FamilyMap } from '../components/LocationMap';
 
 const FamilyDashboard = () => {
   const { api, user } = useAuth();
@@ -286,13 +287,7 @@ const FamilyDashboard = () => {
           <MapPin className="w-5 h-5 text-tg-warning" />
           Family Map
         </h2>
-        <div className="h-64 bg-zinc-800 rounded-xl flex items-center justify-center">
-          <div className="text-center text-zinc-500">
-            <MapPin className="w-12 h-12 mx-auto mb-3 opacity-50" />
-            <p>Map view shows family member locations</p>
-            <p className="text-sm">Center: Nigeria (9.0765°N, 7.3986°E)</p>
-          </div>
-        </div>
+        <FamilyMap members={members} />
       </div>
     </div>
   );

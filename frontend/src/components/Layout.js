@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { 
   Shield, Users, MapPin, AlertTriangle, FileVideo, 
   Home, Settings, Map, Building2, CreditCard, Menu, X,
-  ChevronRight, LogOut, ShieldAlert, Activity
+  ChevronRight, LogOut, ShieldAlert, Activity, Navigation, Compass
 } from 'lucide-react';
 
 const navItems = [
@@ -14,6 +14,7 @@ const navItems = [
   { path: '/incidents', icon: AlertTriangle, label: 'Incidents' },
   { path: '/evidence', icon: FileVideo, label: 'Evidence Vault' },
   { path: '/safe-zones', icon: Map, label: 'Safe Zones' },
+  { path: '/find-safety', icon: Compass, label: 'Find Safety' },
   { path: '/family', icon: Users, label: 'Family Safety' },
   { path: '/subscription', icon: CreditCard, label: 'Subscription' },
   { path: '/corporate', icon: Building2, label: 'Corporate' },

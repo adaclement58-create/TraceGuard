@@ -16,6 +16,9 @@ import httpx
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 import re
+import asyncio
+from contextlib import asynccontextmanager
+import math
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -46,7 +49,237 @@ security = HTTPBearer(auto_error=False)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="TRACEGUARD API", version="1.0.0")
+# ===================== SCHEDULED JOBS =====================
+
+async def check_trip_overdue():
+    """Background job to check for overdue trips and escalate"""
+    logger.info("Running trip overdue check...")
+    try:
+        now = datetime.now(timezone.utc)
+        
+        # Find active trips
+        active_trips = await db.trips.find({"status": {"$in": ["active", "overdue"]}}).to_list(1000)
+        
+        for trip in active_trips:
+            try:
+                # Parse ETA
+                eta_str = trip.get("eta", "")
+                if isinstance(eta_str, str):
+                    # Handle different datetime formats
+                    if 'T' in eta_str:
+                        if eta_str.endswith('Z'):
+                            eta = datetime.fromisoformat(eta_str.replace('Z', '+00:00'))
+                        elif '+' in eta_str or '-' in eta_str[-6:]:
+                            eta = datetime.fromisoformat(eta_str)
+                        else:
+                            eta = datetime.fromisoformat(eta_str).replace(tzinfo=timezone.utc)
+                    else:
+                        eta = datetime.fromisoformat(eta_str).replace(tzinfo=timezone.utc)
+                else:
+                    eta = eta_str if eta_str.tzinfo else eta_str.replace(tzinfo=timezone.utc)
+                
+                # Parse last check-in
+                last_check_in_str = trip.get("last_check_in", "")
+                if isinstance(last_check_in_str, str):
+                    if 'T' in last_check_in_str:
+                        if last_check_in_str.endswith('Z'):
+                            last_check_in = datetime.fromisoformat(last_check_in_str.replace('Z', '+00:00'))
+                        elif '+' in last_check_in_str or '-' in last_check_in_str[-6:]:
+                            last_check_in = datetime.fromisoformat(last_check_in_str)
+                        else:
+                            last_check_in = datetime.fromisoformat(last_check_in_str).replace(tzinfo=timezone.utc)
+                    else:
+                        last_check_in = datetime.fromisoformat(last_check_in_str).replace(tzinfo=timezone.utc)
+                else:
+                    last_check_in = last_check_in_str if last_check_in_str.tzinfo else last_check_in_str.replace(tzinfo=timezone.utc)
+                
+                interval_minutes = trip.get("check_in_interval_minutes", 30)
+                max_missed = trip.get("max_missed_before_escalation", 3)
+                
+                # Calculate missed check-ins
+                minutes_since_checkin = (now - last_check_in).total_seconds() / 60
+                missed = int(minutes_since_checkin / interval_minutes)
+                
+                # Update missed count
+                await db.trips.update_one(
+                    {"id": trip["id"]},
+                    {"$set": {"missed_check_ins": missed}}
+                )
+                
+                # Check if should escalate
+                should_escalate = missed >= max_missed or now > eta
+                
+                if should_escalate and trip["status"] != "escalated":
+                    # Mark trip as escalated
+                    await db.trips.update_one(
+                        {"id": trip["id"]},
+                        {"$set": {"status": "escalated"}}
+                    )
+                    
+                    # Create incident
+                    incident_id = str(uuid.uuid4())
+                    await db.incidents.insert_one({
+                        "id": incident_id,
+                        "owner_email": trip["owner_email"],
+                        "owner_name": trip.get("owner_name", trip["owner_email"]),
+                        "incident_type": "trip_overdue",
+                        "severity": "high",
+                        "status": "active",
+                        "last_known_lat": None,
+                        "last_known_lng": None,
+                        "alerts_sent_count": 0,
+                        "location_pings_count": 0,
+                        "evidence_count": 0,
+                        "created_at": now.isoformat(),
+                        "resolved_at": None
+                    })
+                    
+                    # Send alerts
+                    contacts = await db.trusted_contacts.find({"owner_email": trip["owner_email"]}).to_list(100)
+                    owner_name = trip.get("owner_name", trip["owner_email"])
+                    
+                    for contact in contacts:
+                        if contact.get("phone"):
+                            message = f"TRACEGUARD ALERT: {owner_name} has not checked in on their trip to {trip['destination']}. They may need help. Incident ID: {incident_id[:8]}"
+                            await send_sms(contact["phone"], message)
+                    
+                    # Log audit
+                    await db.audit_logs.insert_one({
+                        "id": str(uuid.uuid4()),
+                        "actor_email": "system",
+                        "action": "trip_escalated",
+                        "target_type": "trip",
+                        "target_id": trip["id"],
+                        "timestamp": now.isoformat()
+                    })
+                    
+                    logger.info(f"Trip {trip['id']} escalated for user {trip['owner_email']}")
+                
+                elif missed > 0 and trip["status"] == "active":
+                    # Mark as overdue
+                    await db.trips.update_one(
+                        {"id": trip["id"]},
+                        {"$set": {"status": "overdue"}}
+                    )
+            except Exception as trip_error:
+                logger.warning(f"Error processing trip {trip.get('id')}: {trip_error}")
+                continue
+                
+    except Exception as e:
+        logger.error(f"Trip overdue check failed: {e}")
+
+async def check_geofences():
+    """Background job to check geofence transitions"""
+    logger.info("Running geofence check...")
+    try:
+        # Get all user locations
+        user_locations = await db.user_locations.find({}).to_list(10000)
+        
+        for loc in user_locations:
+            user_email = loc["owner_email"]
+            user_lat = loc["latitude"]
+            user_lng = loc["longitude"]
+            
+            # Get user's active zones
+            zones = await db.safe_zones.find({
+                "owner_email": user_email,
+                "is_active": True
+            }).to_list(100)
+            
+            for zone in zones:
+                distance = haversine_distance(
+                    user_lat, user_lng,
+                    zone["latitude"], zone["longitude"]
+                )
+                
+                is_inside = distance <= zone["radius"]
+                was_inside = zone.get("last_event") == "enter"
+                
+                # Detect transition
+                if is_inside and not was_inside:
+                    # Entered zone
+                    await db.safe_zones.update_one(
+                        {"id": zone["id"]},
+                        {"$set": {"last_event": "enter"}}
+                    )
+                    
+                    if zone.get("notify_on_enter"):
+                        await notify_zone_transition(user_email, zone, "enter")
+                        
+                elif not is_inside and was_inside:
+                    # Exited zone
+                    await db.safe_zones.update_one(
+                        {"id": zone["id"]},
+                        {"$set": {"last_event": "exit"}}
+                    )
+                    
+                    if zone.get("notify_on_exit"):
+                        await notify_zone_transition(user_email, zone, "exit")
+                        
+    except Exception as e:
+        logger.error(f"Geofence check failed: {e}")
+
+async def notify_zone_transition(user_email: str, zone: dict, event_type: str):
+    """Send notifications for zone transitions"""
+    contacts = await db.trusted_contacts.find({"owner_email": user_email}).to_list(100)
+    user = await db.users.find_one({"email": user_email})
+    user_name = user.get("full_name", user_email) if user else user_email
+    
+    action = "entered" if event_type == "enter" else "left"
+    message = f"TRACEGUARD: {user_name} has {action} {zone['name']}"
+    
+    for contact in contacts:
+        if contact.get("phone") and contact.get("notification_preference") in ["sms", "both"]:
+            await send_sms(contact["phone"], message)
+
+def haversine_distance(lat1, lon1, lat2, lon2):
+    """Calculate distance between two points in meters"""
+    R = 6371000  # Earth's radius in meters
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    delta_phi = math.radians(lat2 - lat1)
+    delta_lambda = math.radians(lon2 - lon1)
+    
+    a = math.sin(delta_phi / 2) ** 2 + \
+        math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2) ** 2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    
+    return R * c
+
+# Background task runner
+scheduler_task = None
+
+async def run_scheduled_jobs():
+    """Run scheduled jobs in the background"""
+    while True:
+        try:
+            await check_trip_overdue()
+            await check_geofences()
+        except Exception as e:
+            logger.error(f"Scheduled job error: {e}")
+        
+        # Run every 5 minutes
+        await asyncio.sleep(300)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage application lifespan"""
+    global scheduler_task
+    # Start background scheduler
+    scheduler_task = asyncio.create_task(run_scheduled_jobs())
+    logger.info("Background scheduler started")
+    yield
+    # Shutdown
+    if scheduler_task:
+        scheduler_task.cancel()
+        try:
+            await scheduler_task
+        except asyncio.CancelledError:
+            pass
+    client.close()
+    logger.info("Application shutdown complete")
+
+app = FastAPI(title="TRACEGUARD API", version="1.0.0", lifespan=lifespan)
 api_router = APIRouter(prefix="/api")
 
 # ===================== PYDANTIC MODELS =====================
@@ -1292,7 +1525,3 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-@app.on_event("shutdown")
-async def shutdown_db_client():
-    client.close()

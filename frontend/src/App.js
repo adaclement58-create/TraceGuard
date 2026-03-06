@@ -17,6 +17,7 @@ import FamilyDashboard from './pages/FamilyDashboard';
 import CorporateDashboard from './pages/CorporateDashboard';
 import Settings from './pages/Settings';
 import AdminDashboard from './pages/AdminDashboard';
+import FindSafety from './pages/FindSafety';
 
 // Layout
 import Layout from './components/Layout';
@@ -166,6 +167,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <AdminDashboard />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/find-safety"
+        element={
+          <ProtectedRoute>
+            <FindSafety />
           </ProtectedRoute>
         }
       />

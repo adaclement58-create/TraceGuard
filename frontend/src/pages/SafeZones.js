@@ -6,10 +6,12 @@ import { Input } from '../components/ui/input';
 import { Button } from '../components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Switch } from '../components/ui/switch';
+import { SafeZonesMap } from '../components/LocationMap';
 
 const SafeZones = () => {
   const { api } = useAuth();
   const [zones, setZones] = useState([]);
+  const [userLocation, setUserLocation] = useState(null);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -30,6 +32,15 @@ const SafeZones = () => {
     try {
       const response = await api.get('/safe-zones');
       setZones(response.data || []);
+      
+      // Get user's current location for the map
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => setUserLocation({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }),
+          () => {},
+          { timeout: 5000 }
+        );
+      }
     } catch (error) {
       console.error('Error fetching zones:', error);
     } finally {
@@ -350,6 +361,17 @@ const SafeZones = () => {
               )}
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Zones Map */}
+      {zones.length > 0 && (
+        <div className="tg-card p-6">
+          <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+            <Map className="w-5 h-5 text-blue-400" />
+            Zone Map
+          </h2>
+          <SafeZonesMap zones={zones} userLocation={userLocation} />
         </div>
       )}
 

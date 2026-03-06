@@ -3,16 +3,19 @@ import { useAuth } from '../context/AuthContext';
 import { Link } from 'react-router-dom';
 import { 
   ShieldCheck, ShieldAlert, MapPin, Users, CheckCircle2,
-  AlertTriangle, Phone, Navigation, Clock, Send, Loader2
+  AlertTriangle, Phone, Navigation, Clock, Send, Loader2, Camera
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { Input } from '../components/ui/input';
 import { Button } from '../components/ui/button';
+import { EvidenceCapture } from '../components/EvidenceCapture';
+import { useLiveLocationTracker, useLocationReporter, useGeofenceMonitor, useOfflineSOS } from '../hooks/useLocationTracking';
 
 const Home = () => {
   const { user, api } = useAuth();
   const [profile, setProfile] = useState(null);
   const [contacts, setContacts] = useState([]);
+  const [zones, setZones] = useState([]);
   const [activeIncident, setActiveIncident] = useState(null);
   const [loading, setLoading] = useState(true);
   const [sosActive, setSosActive] = useState(false);
@@ -21,24 +24,50 @@ const Home = () => {
   const [resolvePin, setResolvePin] = useState('');
   const [resolving, setResolving] = useState(false);
   const [sendingTest, setSendingTest] = useState(false);
+  const [showEvidenceCapture, setShowEvidenceCapture] = useState(false);
   
   const holdTimerRef = useRef(null);
   const holdStartRef = useRef(null);
 
+  // Location tracking hooks
+  useLiveLocationTracker({
+    api,
+    incidentId: activeIncident?.id,
+    isActive: sosActive,
+    intervalMs: 30000
+  });
+
+  useLocationReporter({
+    api,
+    enabled: true,
+    intervalMs: 60000
+  });
+
+  useGeofenceMonitor({
+    api,
+    zones: zones.filter(z => z.is_active),
+    enabled: true
+  });
+
+  const { queueSOS } = useOfflineSOS({ api });
+
   const fetchData = useCallback(async () => {
     try {
-      const [profileRes, contactsRes, incidentsRes] = await Promise.all([
+      const [profileRes, contactsRes, incidentsRes, zonesRes] = await Promise.all([
         api.get('/profile').catch(() => ({ data: null })),
         api.get('/contacts').catch(() => ({ data: [] })),
-        api.get('/incidents').catch(() => ({ data: [] }))
+        api.get('/incidents').catch(() => ({ data: [] })),
+        api.get('/safe-zones').catch(() => ({ data: [] }))
       ]);
 
       setProfile(profileRes.data?.status === 'no_profile' ? null : profileRes.data);
       setContacts(contactsRes.data || []);
+      setZones(zonesRes.data || []);
       
       const active = incidentsRes.data?.find(i => i.status === 'active');
       setActiveIncident(active);
       setSosActive(!!active);
+      if (active) setShowEvidenceCapture(true);
     } catch (error) {
       console.error('Error fetching data:', error);
     } finally {
@@ -89,6 +118,19 @@ const Home = () => {
         console.log('Location unavailable');
       }
 
+      // Check if offline - queue SOS
+      if (!navigator.onLine) {
+        queueSOS({
+          incident_type: 'sos',
+          severity: 'high',
+          latitude: lat,
+          longitude: lng
+        });
+        alert('You are offline. SOS has been queued and will be sent when you reconnect.');
+        setHoldProgress(0);
+        return;
+      }
+
       const response = await api.post('/incidents', {
         incident_type: 'sos',
         severity: 'high',
@@ -99,6 +141,7 @@ const Home = () => {
       setActiveIncident(response.data);
       setSosActive(true);
       setHoldProgress(0);
+      setShowEvidenceCapture(true); // Auto-show evidence capture
     } catch (error) {
       console.error('SOS activation failed:', error);
       alert('Failed to activate SOS. Please try again.');
@@ -115,11 +158,31 @@ const Home = () => {
       setActiveIncident(null);
       setResolveDialogOpen(false);
       setResolvePin('');
+      setShowEvidenceCapture(false);
       fetchData();
     } catch (error) {
       alert(error.response?.data?.detail || 'Invalid PIN');
     } finally {
       setResolving(false);
+    }
+  };
+
+  const handleEvidenceCapture = async (evidenceItem) => {
+    if (!activeIncident) return;
+    
+    try {
+      // In production, upload blob to storage and get URL
+      // For now, create a data URL or use object URL
+      await api.post('/evidence', {
+        incident_id: activeIncident.id,
+        evidence_type: evidenceItem.type,
+        file_url: evidenceItem.url,
+        sha256_hash: evidenceItem.hash,
+        duration: evidenceItem.duration
+      });
+      console.log('Evidence uploaded successfully');
+    } catch (error) {
+      console.error('Failed to upload evidence:', error);
     }
   };
 
@@ -268,9 +331,19 @@ const Home = () => {
           <div className="mt-6 text-center">
             <p className="text-zinc-400 text-sm">Incident ID: {activeIncident.id.slice(0, 8)}</p>
             <p className="text-zinc-400 text-sm">Alerts sent: {activeIncident.alerts_sent_count || 0}</p>
+            <p className="text-tg-safe text-xs mt-2">📍 Live location tracking active</p>
           </div>
         )}
       </div>
+
+      {/* Evidence Capture (shown during active SOS) */}
+      {sosActive && showEvidenceCapture && (
+        <EvidenceCapture
+          onEvidenceCapture={handleEvidenceCapture}
+          autoStart={profile?.auto_evidence_capture}
+          incidentId={activeIncident?.id}
+        />
+      )}
 
       {/* Quick Actions */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
