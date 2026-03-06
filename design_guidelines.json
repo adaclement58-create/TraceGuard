@@ -1,0 +1,135 @@
+{
+  "design_identity": {
+    "persona": "E1 - The Anti-AI Designer",
+    "philosophy": [
+      "Fusion over Imitation: Mix Tactical Precision with Consumer Trust.",
+      "Emotion First: Safety is about Calm (Green) vs. Urgency (Red).",
+      "Content is King: Data must be legible in high-stress situations.",
+      "Zoom In: Big buttons, clear status indicators.",
+      "Negative Space: Reduce cognitive load during emergencies.",
+      "Contrast: High contrast is non-negotiable for safety apps."
+    ],
+    "anti_patterns": [
+      "Purple/Teal generics for main actions.",
+      "Low contrast text (grey on grey).",
+      "Tiny touch targets.",
+      "Cluttered dashboards in emergency views."
+    ]
+  },
+  "typography": {
+    "font_family": {
+      "headings": "Barlow Condensed, sans-serif",
+      "body": "Inter, sans-serif",
+      "mono": "JetBrains Mono, monospace"
+    },
+    "installation_command": "@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;500;600;700&family=Inter:wght@300;400;500;600&family=JetBrains+Mono&display=swap');",
+    "usage_rules": {
+      "headings": "Uppercase, tracking-tight, bold weights (600/700). Use for status states (SAFE, ALERT, SOS).",
+      "body": "Regular weights, generous line-height (1.6). High legibility.",
+      "labels": "Uppercase, tracking-widest, text-xs, muted colors."
+    }
+  },
+  "colors": {
+    "theme_mode": "dark",
+    "palette": {
+      "background": {
+        "default": "#09090b",
+        "paper": "#18181b",
+        "overlay": "rgba(9, 9, 11, 0.8)"
+      },
+      "text": {
+        "primary": "#f8fafc",
+        "secondary": "#a1a1aa",
+        "muted": "#52525b"
+      },
+      "brand": {
+        "safe": "#10b981",
+        "safe_glow": "rgba(16, 185, 129, 0.5)",
+        "warning": "#f59e0b",
+        "danger": "#ef4444",
+        "danger_glow": "rgba(239, 68, 68, 0.5)",
+        "neutral": "#64748b"
+      },
+      "border": {
+        "default": "#27272a",
+        "active": "#3f3f46"
+      }
+    },
+    "gradients": {
+      "sos_active": "radial-gradient(circle, rgba(239,68,68,0.2) 0%, rgba(9,9,11,0) 70%)",
+      "safe_zone": "radial-gradient(circle, rgba(16,185,129,0.1) 0%, rgba(9,9,11,0) 70%)"
+    }
+  },
+  "layout_strategy": {
+    "grid_system": "Bento Grid (Mobile-First)",
+    "container_padding": "p-4 md:p-6 lg:p-8",
+    "spacing_scale": "Relaxed (gap-4 to gap-8)",
+    "rules": [
+      "Mobile: Single column stack for urgency.",
+      "Desktop: Dashboard layout with Sidebar (Left) + Bento Grid (Right).",
+      "SOS Button: Always fixed/sticky or centrally prominent.",
+      "Cards: rounded-xl or rounded-2xl."
+    ]
+  },
+  "components": {
+    "SOSButton": {
+      "description": "The heart of the app. A large circular button that requires a 'Press and Hold' interaction to prevent false positives.",
+      "interaction": "Hold for 3 seconds. Visual ring fills up. Haptic feedback on complete.",
+      "styling": "h-32 w-32 or h-48 w-48. Rounded-full. Border-4 border-danger/30. Inner pulse animation.",
+      "motion": "Animate scale [1, 1.05, 1] loop. Ring fill uses SVG stroke-dasharray."
+    },
+    "StatusBanner": {
+      "description": "Top banner indicating current safety status.",
+      "variants": ["SAFE (Green)", "TRIP_ACTIVE (Amber)", "SOS_ACTIVE (Red Pulse)"],
+      "styling": "w-full py-3 px-4 flex items-center justify-between backdrop-blur-md"
+    },
+    "GlassCard": {
+      "description": "Container for trusted circle, incidents, and trip details.",
+      "styling": "bg-zinc-900/60 backdrop-blur-xl border border-white/10 shadow-xl rounded-2xl"
+    },
+    "Navigation": {
+      "mobile": "Bottom Tab Bar (Glassmorphism). Icons: Shield (Home), Map (Trips), Users (Family), Menu.",
+      "desktop": "Vertical Sidebar (Left). High contrast links."
+    }
+  },
+  "visual_enhancers": {
+    "glassmorphism": "backdrop-blur-xl bg-background/60 border border-white/10",
+    "glow_effects": "box-shadow: 0 0 20px theme('colors.brand.danger_glow')",
+    "borders": "1px solid rgba(255,255,255,0.08)",
+    "motion": {
+      "pulse": "animate-pulse",
+      "ping": "animate-ping",
+      "transition": "transition-all duration-300 ease-out"
+    }
+  },
+  "assets": {
+    "images": {
+      "onboarding_hero": "https://images.unsplash.com/photo-1764258560078-fe9909b3da5c?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2NDN8MHwxfHNlYXJjaHwyfHxjeWJlcnNlY3VyaXR5JTIwYWJzdHJhY3QlMjBsb2NrJTIwc2hpZWxkJTIwZ2xvd2luZyUyMGRhcmslMjBtb2RlfGVufDB8fHx8MTc3Mjc5NDgzNHww&ixlib=rb-4.1.0&q=85",
+      "sos_background": "https://images.unsplash.com/photo-1771814565026-58211c831115?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NTJ8MHwxfHNlYXJjaHwxfHxhYnN0cmFjdCUyMHJlZCUyMGVtZXJnZW5jeSUyMGxpZ2h0JTIwcHVsc2UlMjBkYXJrJTIwYmFja2dyb3VuZHxlbnwwfHx8fDE3NzI3OTQ4MzZ8MA&ixlib=rb-4.1.0&q=85",
+      "corporate_bg": "https://images.unsplash.com/photo-1760163287830-e7d738afe1e1?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1ODh8MHwxfHNlYXJjaHwzfHxtb2Rlcm4lMjBjb3Jwb3JhdGUlMjBvZmZpY2UlMjB0ZWFtJTIwbWVldGluZyUyMGRhcmslMjBsaWdodGluZ3xlbnwwfHx8fDE3NzI3OTQ4MzV8MA&ixlib=rb-4.1.0&q=85",
+      "avatars": [
+        "https://images.unsplash.com/photo-1675186914580-94356f7c012c?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NzV8MHwxfHNlYXJjaHw0fHxkaXZlcnNlJTIwcHJvZmVzc2lvbmFsJTIwcG9ydHJhaXRzJTIwY2xvc2UlMjB1cHxlbnwwfHx8fDE3NzI3OTQ4MzR8MA&ixlib=rb-4.1.0&q=85",
+        "https://images.unsplash.com/photo-1668723020601-9ce572e24e06?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NzV8MHwxfHNlYXJjaHwzfHxkaXZlcnNlJTIwcHJvZmVzc2lvbmFsJTIwcG9ydHJhaXRzJTIwY2xvc2UlMjB1cHxlbnwwfHx8fDE3NzI3OTQ4MzR8MA&ixlib=rb-4.1.0&q=85",
+        "https://images.unsplash.com/photo-1658909835269-e76abd3ffb5d?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NzV8MHwxfHNlYXJjaHwyfHxkaXZlcnNlJTIwcHJvZmVzc2lvbmFsJTIwcG9ydHJhaXRzJTIwY2xvc2UlMjB1cHxlbnwwfHx8fDE3NzI3OTQ4MzR8MA&ixlib=rb-4.1.0&q=85"
+      ]
+    },
+    "icons": {
+      "library": "lucide-react",
+      "preferred": ["ShieldAlert", "MapPin", "Users", "Video", "Radio", "Activity", "CheckCircle2", "AlertTriangle"]
+    }
+  },
+  "instructions_to_main_agent": [
+    "INSTALL: npm install framer-motion lucide-react clsx tailwind-merge (or yarn add)",
+    "THEME: Ensure tailwind.config.js has darkMode: 'class' and defines the custom colors under 'extend'.",
+    "SOS LOGIC: The SOS button must utilize 'useLongPress' hook logic or framer-motion gestures (onTapStart, onPanEnd). Do not make it a simple click.",
+    "MAPS: Use a dark-themed map style (e.g., Mapbox Dark or Google Maps Night Mode JSON style). If using a placeholder, use a dark abstract map image.",
+    "TESTING: Add data-testid to the SOS button ('sos-trigger'), Status Banner ('status-banner'), and Trusted Circle list ('trusted-circle-list')."
+  ],
+  "universal_guidelines": {
+    "do_not_center_align_app": "The .App class must not have text-align: center.",
+    "focus_states": "All interactive elements must have a visible focus ring (ring-2 ring-brand-safe) for accessibility.",
+    "error_states": "Form errors should be displayed in brand-danger text with an alert icon.",
+    "touch_targets": "Minimum 44px for all mobile interactive elements.",
+    "scroll_behavior": "Use 'scroll-smooth' on the html tag."
+  }
+}
