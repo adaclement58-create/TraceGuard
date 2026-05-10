@@ -28,12 +28,30 @@ next-env.d.ts
 # Production builds
 /build
 dist/
-dist
 
-# Environment files (comprehensive coverage)
+# Environment files - CRITICAL: Never commit actual .env files
+.env
+.env.local
+.env.development
+.env.test
+.env.production
+.env.development.local
+.env.test.local
+.env.production.local
+frontend/.env
+backend/.env
 
+# Allow .env.example files (templates without real secrets)
+!.env.example
+!frontend/.env.example
+!backend/.env.example
+
+# Credentials and secrets
+credentials.json
 *token.json*
-*credentials.json*
+*.pem
+*.key
+.credentials
 
 # Logs and debug files
 npm-debug.log*
@@ -41,16 +59,21 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 dump.rdb
+*.log
 
 # System files
 .DS_Store
-*.pem
+Thumbs.db
 
 # Python
 __pycache__/
-*pyc*
+*.pyc
+*.pyo
+*.pyd
 venv/
 .venv/
+*.egg-info/
+.eggs/
 
 # Development tools
 chainlit.md
@@ -63,6 +86,8 @@ chainlit.md
 
 # Data and databases
 agenthub/agents/youtube/db
+*.db
+*.sqlite
 
 # Archive files and large assets
 **/*.zip
@@ -77,70 +102,5 @@ agenthub/agents/youtube/db
 .cache/
 
 # Mobile development
-android-sdk/ frontend/node_modules/.cache/default-development/0.pack
-frontend/node_modules/.cache/default-development/1.pack
-frontend/node_modules/.cache/default-development/0.pack
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
+android-sdk/
 frontend/node_modules/.cache/default-development/7.pack
