@@ -18,6 +18,7 @@ import CorporateDashboard from './pages/CorporateDashboard';
 import Settings from './pages/Settings';
 import AdminDashboard from './pages/AdminDashboard';
 import FindSafety from './pages/FindSafety';
+import TacticalMode from './pages/TacticalMode';
 
 // Layout
 import Layout from './components/Layout';
@@ -175,6 +176,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <FindSafety />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/tactical"
+        element={
+          <ProtectedRoute>
+            <TacticalMode />
           </ProtectedRoute>
         }
       />
