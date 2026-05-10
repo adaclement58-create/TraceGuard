@@ -12,6 +12,7 @@ import { EvidenceCapture } from '../components/EvidenceCapture';
 import { useLiveLocationTracker, useLocationReporter, useGeofenceMonitor, useOfflineSOS } from '../hooks/useLocationTracking';
 import VoiceSOS from '../components/VoiceSOS';
 import QuickAccess from '../components/QuickAccess';
+import SafetyScore from '../components/SafetyScore';
 
 const Home = () => {
   const { user, api } = useAuth();
@@ -403,6 +404,9 @@ const Home = () => {
 
       {/* Quick Access - Nearest Safety Points */}
       <QuickAccess />
+
+      {/* Safety Score */}
+      <SafetyScore />
 
       {/* Emergency Contacts Preview */}
       {contacts.length > 0 && (

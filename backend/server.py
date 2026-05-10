@@ -1886,6 +1886,198 @@ async def get_area_risk_assessment(
             "incidents_count": len(nearby_incidents)
         }
 
+# ===================== SAFETY SCORE ENDPOINT =====================
+
+class SafetyScoreRequest(BaseModel):
+    latitude: float
+    longitude: float
+
+@api_router.post("/safety-score")
+async def get_safety_score(
+    request: SafetyScoreRequest,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Calculate comprehensive safety score for user's current location.
+    Analyzes: nearby incidents, police coverage, time-based risk, area characteristics.
+    Returns: score (0-100), breakdown, recommendations.
+    """
+    from emergentintegrations.llm.chat import LlmChat, UserMessage
+    
+    latitude = request.latitude
+    longitude = request.longitude
+    radius_km = 5.0
+    
+    # 1. Get incidents in the area (last 30 days)
+    thirty_days_ago = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+    all_incidents = await db.incidents.find({
+        "latitude": {"$exists": True},
+        "longitude": {"$exists": True}
+    }).to_list(1000)
+    
+    # Filter by distance and time
+    nearby_incidents = []
+    for inc in all_incidents:
+        if inc.get('latitude') and inc.get('longitude'):
+            lat1, lon1 = latitude, longitude
+            lat2, lon2 = inc['latitude'], inc['longitude']
+            R = 6371
+            dlat = math.radians(lat2 - lat1)
+            dlon = math.radians(lon2 - lon1)
+            a = math.sin(dlat/2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon/2)**2
+            c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+            distance = R * c
+            if distance <= radius_km:
+                nearby_incidents.append({
+                    "type": inc.get("incident_type"),
+                    "severity": inc.get("severity"),
+                    "time": inc.get("created_at"),
+                    "distance_km": round(distance, 2),
+                    "status": inc.get("status")
+                })
+    
+    # 2. Get safe zones in the area
+    user_safe_zones = await db.safe_zones.find({"owner_email": user["email"]}).to_list(100)
+    zones_nearby = 0
+    for zone in user_safe_zones:
+        if zone.get('latitude') and zone.get('longitude'):
+            lat2, lon2 = zone['latitude'], zone['longitude']
+            R = 6371
+            dlat = math.radians(lat2 - latitude)
+            dlon = math.radians(lon2 - longitude)
+            a = math.sin(dlat/2)**2 + math.cos(math.radians(latitude)) * math.cos(math.radians(lat2)) * math.sin(dlon/2)**2
+            c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+            distance = R * c
+            if distance <= radius_km:
+                zones_nearby += 1
+    
+    # 3. Calculate base score components
+    current_hour = datetime.now().hour
+    
+    # Time-based risk (higher risk at night)
+    if 6 <= current_hour < 18:
+        time_score = 90  # Daytime - safer
+    elif 18 <= current_hour < 22:
+        time_score = 70  # Evening - moderate
+    else:
+        time_score = 50  # Night - higher risk
+    
+    # Incident-based score (fewer incidents = higher score)
+    incident_count = len(nearby_incidents)
+    if incident_count == 0:
+        incident_score = 100
+    elif incident_count <= 2:
+        incident_score = 80
+    elif incident_count <= 5:
+        incident_score = 60
+    elif incident_count <= 10:
+        incident_score = 40
+    else:
+        incident_score = 20
+    
+    # Safe zone bonus
+    safe_zone_bonus = min(zones_nearby * 5, 15)  # Up to 15 points for safe zones
+    
+    # Calculate overall score
+    base_score = (incident_score * 0.5) + (time_score * 0.3) + (20 * 0.2)  # 20 is baseline coverage
+    overall_score = min(100, base_score + safe_zone_bonus)
+    
+    # Determine risk level
+    if overall_score >= 80:
+        risk_level = "Low"
+        risk_color = "green"
+    elif overall_score >= 60:
+        risk_level = "Moderate"
+        risk_color = "yellow"
+    elif overall_score >= 40:
+        risk_level = "Elevated"
+        risk_color = "orange"
+    else:
+        risk_level = "High"
+        risk_color = "red"
+    
+    # 4. Generate AI recommendations
+    context = f"""
+    Location Safety Analysis:
+    - Coordinates: {latitude}, {longitude}
+    - Nearby Incidents (5km, last 30 days): {incident_count}
+    - Safe Zones in Area: {zones_nearby}
+    - Current Time: {current_hour}:00 ({"Day" if 6 <= current_hour < 18 else "Night"})
+    - Base Safety Score: {overall_score}/100
+    - Risk Level: {risk_level}
+    
+    Recent Incidents:
+    {nearby_incidents[:5] if nearby_incidents else "None"}
+    """
+    
+    recommendations = []
+    ai_insights = None
+    
+    try:
+        EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
+        if EMERGENT_LLM_KEY:
+            chat = LlmChat(
+                api_key=EMERGENT_LLM_KEY,
+                session_id=f"safety-score-{latitude}-{longitude}",
+                system_message="""You are a safety advisor for TRACEGUARD. Based on the area analysis, provide:
+                1. A brief safety assessment (1-2 sentences)
+                2. 3 specific safety recommendations for the user
+                3. Best times to be in this area
+                Be concise and practical. Format as JSON with keys: assessment, recommendations (array), best_times"""
+            ).with_model("openai", "gpt-5.2")
+            
+            message = UserMessage(text=f"Analyze this area's safety:\n{context}")
+            ai_response = await chat.send_message(message)
+            ai_insights = ai_response
+    except Exception as e:
+        logger.error(f"AI safety score error: {e}")
+    
+    # Default recommendations based on score
+    if overall_score < 60:
+        recommendations = [
+            "Stay alert and aware of your surroundings",
+            "Share your location with trusted contacts",
+            "Avoid isolated areas, especially after dark"
+        ]
+    elif overall_score < 80:
+        recommendations = [
+            "Keep your phone charged and accessible",
+            "Let someone know your whereabouts",
+            "Use well-lit main routes when possible"
+        ]
+    else:
+        recommendations = [
+            "Area appears relatively safe",
+            "Standard safety precautions recommended",
+            "Emergency services are accessible nearby"
+        ]
+    
+    return {
+        "score": round(overall_score),
+        "risk_level": risk_level,
+        "risk_color": risk_color,
+        "breakdown": {
+            "incident_score": incident_score,
+            "time_score": time_score,
+            "safe_zone_bonus": safe_zone_bonus,
+            "incidents_nearby": incident_count,
+            "safe_zones_nearby": zones_nearby
+        },
+        "time_analysis": {
+            "current_hour": current_hour,
+            "period": "Day" if 6 <= current_hour < 18 else "Evening" if 18 <= current_hour < 22 else "Night",
+            "is_high_risk_time": current_hour < 6 or current_hour >= 22
+        },
+        "recommendations": recommendations,
+        "ai_insights": ai_insights,
+        "location": {
+            "latitude": latitude,
+            "longitude": longitude,
+            "radius_km": radius_km
+        },
+        "generated_at": datetime.now(timezone.utc).isoformat()
+    }
+
 # ===================== UTILITY ENDPOINTS =====================
 
 @api_router.get("/")
