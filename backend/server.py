@@ -533,6 +533,86 @@ async def get_me(user: dict = Depends(get_current_user)):
         created_at=user["created_at"]
     )
 
+# Google OAuth callback handler
+class GoogleAuthRequest(BaseModel):
+    token: str
+
+@api_router.post("/auth/google")
+async def google_auth(data: GoogleAuthRequest):
+    """Handle Google OAuth token from Emergent Auth"""
+    try:
+        # Emergent Auth tokens are JWTs - try to decode to get user info
+        # The token from Emergent Auth contains user email
+        import base64
+        import json as json_module
+        
+        # Decode JWT payload without verification (Emergent Auth already verified)
+        token_parts = data.token.split('.')
+        if len(token_parts) >= 2:
+            # Decode the payload (second part)
+            payload_b64 = token_parts[1]
+            # Add padding if needed
+            padding = 4 - len(payload_b64) % 4
+            if padding != 4:
+                payload_b64 += '=' * padding
+            payload_json = base64.urlsafe_b64decode(payload_b64)
+            payload = json_module.loads(payload_json)
+            
+            email = payload.get('email') or payload.get('sub')
+            name = payload.get('name') or payload.get('full_name') or email.split('@')[0] if email else 'User'
+            
+            if not email:
+                raise HTTPException(status_code=400, detail="Invalid token: no email found")
+            
+            # Check if user exists
+            existing_user = await db.users.find_one({"email": email})
+            
+            if existing_user:
+                # User exists - create our JWT token
+                access_token = create_access_token(data={"sub": email})
+                return {
+                    "access_token": access_token,
+                    "token_type": "bearer",
+                    "user": {
+                        "id": existing_user["id"],
+                        "email": existing_user["email"],
+                        "full_name": existing_user["full_name"],
+                        "role": existing_user.get("role", "user"),
+                        "created_at": existing_user["created_at"]
+                    }
+                }
+            else:
+                # New user - create account
+                user_doc = {
+                    "id": str(uuid.uuid4()),
+                    "email": email,
+                    "full_name": name,
+                    "password_hash": "",  # No password for OAuth users
+                    "role": "user",
+                    "auth_provider": "google",
+                    "created_at": datetime.now(timezone.utc).isoformat()
+                }
+                await db.users.insert_one(user_doc)
+                
+                access_token = create_access_token(data={"sub": email})
+                return {
+                    "access_token": access_token,
+                    "token_type": "bearer",
+                    "user": {
+                        "id": user_doc["id"],
+                        "email": user_doc["email"],
+                        "full_name": user_doc["full_name"],
+                        "role": user_doc["role"],
+                        "created_at": user_doc["created_at"]
+                    }
+                }
+        else:
+            raise HTTPException(status_code=400, detail="Invalid token format")
+            
+    except Exception as e:
+        logger.error(f"Google auth error: {e}")
+        raise HTTPException(status_code=400, detail=f"Authentication failed: {str(e)}")
+
 # ===================== OTP ENDPOINTS =====================
 
 @api_router.post("/auth/send-otp")

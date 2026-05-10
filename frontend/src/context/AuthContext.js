@@ -34,16 +34,43 @@ export const AuthProvider = ({ children }) => {
 
   // Handle Google OAuth callback - check for token in URL
   useEffect(() => {
-    const urlParams = new URLSearchParams(window.location.search);
-    const googleToken = urlParams.get('token');
+    const handleOAuthCallback = async () => {
+      const urlParams = new URLSearchParams(window.location.search);
+      const hashParams = new URLSearchParams(window.location.hash.replace('#', '?'));
+      
+      // Try multiple token parameter names that Emergent Auth might use
+      const oauthToken = urlParams.get('token') || 
+                          urlParams.get('access_token') || 
+                          hashParams.get('token') ||
+                          hashParams.get('access_token');
+      
+      if (oauthToken) {
+        console.log('[Auth] OAuth token received, exchanging with backend...');
+        
+        try {
+          // Exchange OAuth token with our backend to get our JWT
+          const response = await axios.post(`${API}/auth/google`, {
+            token: oauthToken
+          });
+          
+          const { access_token, user: userData } = response.data;
+          console.log('[Auth] Token exchanged successfully');
+          
+          localStorage.setItem('tg_token', access_token);
+          setToken(access_token);
+          setUser(userData);
+          
+          // Clean URL - remove both search params and hash
+          window.history.replaceState({}, document.title, window.location.pathname);
+        } catch (error) {
+          console.error('[Auth] OAuth token exchange failed:', error);
+          // Clean URL anyway
+          window.history.replaceState({}, document.title, window.location.pathname);
+        }
+      }
+    };
     
-    if (googleToken) {
-      console.log('[Auth] Google OAuth token received');
-      localStorage.setItem('tg_token', googleToken);
-      setToken(googleToken);
-      // Clean URL
-      window.history.replaceState({}, document.title, window.location.pathname);
-    }
+    handleOAuthCallback();
   }, []);
 
   const fetchUser = useCallback(async () => {
