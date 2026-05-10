@@ -966,6 +966,97 @@ async def send_test_alert(user: dict = Depends(get_current_user)):
     
     return {"status": "sent", "alerts_sent": sent_count}
 
+# ===================== SMS FALLBACK SOS =====================
+
+class SMSSOSRequest(BaseModel):
+    phone: str
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    message: Optional[str] = None
+
+@api_router.post("/incidents/sms-sos")
+async def create_sms_sos(data: SMSSOSRequest, background_tasks: BackgroundTasks):
+    """
+    SMS-based SOS for offline scenarios.
+    This endpoint can be triggered when user has no internet but can send SMS.
+    """
+    # Find user by phone number
+    profile = await db.emergency_profiles.find_one({"phone_number": {"$regex": data.phone[-10:]}})
+    
+    if not profile:
+        # Try to find by matching last 10 digits
+        all_profiles = await db.emergency_profiles.find({}).to_list(1000)
+        for p in all_profiles:
+            if p.get("phone_number") and data.phone[-10:] in p.get("phone_number", ""):
+                profile = p
+                break
+    
+    if not profile:
+        logger.warning(f"SMS SOS from unknown phone: {data.phone}")
+        return {"status": "error", "message": "Phone not registered"}
+    
+    user = await db.users.find_one({"email": profile["owner_email"]})
+    if not user:
+        return {"status": "error", "message": "User not found"}
+    
+    # Create incident
+    incident_id = str(uuid.uuid4())
+    incident_doc = {
+        "id": incident_id,
+        "owner_email": profile["owner_email"],
+        "owner_name": user.get("full_name", profile["owner_email"]),
+        "incident_type": "sms_sos",
+        "severity": "high",
+        "status": "active",
+        "last_known_lat": data.latitude,
+        "last_known_lng": data.longitude,
+        "sms_triggered": True,
+        "trigger_phone": data.phone,
+        "alerts_sent_count": 0,
+        "location_pings_count": 0,
+        "evidence_count": 0,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "resolved_at": None
+    }
+    await db.incidents.insert_one(incident_doc)
+    
+    # Send alerts
+    background_tasks.add_task(send_alerts_task, profile["owner_email"], incident_id, user.get("full_name", "User"))
+    
+    logger.info(f"SMS SOS created for {profile['owner_email']} from phone {data.phone}")
+    
+    return {"status": "created", "incident_id": incident_id}
+
+@api_router.post("/sms/send-location")
+async def send_location_via_sms(user: dict = Depends(get_current_user)):
+    """
+    Send current location to all contacts via SMS.
+    Useful when user wants to share location but has limited connectivity.
+    """
+    profile = await db.emergency_profiles.find_one({"owner_email": user["email"]})
+    contacts = await db.trusted_contacts.find({"owner_email": user["email"]}).to_list(100)
+    
+    if not contacts:
+        raise HTTPException(status_code=400, detail="No contacts configured")
+    
+    # Get last known location
+    lat = profile.get("last_known_lat") if profile else None
+    lng = profile.get("last_known_lng") if profile else None
+    
+    location_text = ""
+    if lat and lng:
+        location_text = f"https://maps.google.com/?q={lat},{lng}"
+    
+    message = f"TRACEGUARD: {user['full_name']} is sharing their location with you. {location_text}"
+    
+    sent_count = 0
+    for contact in contacts:
+        if contact.get("phone"):
+            await send_sms(contact["phone"], message)
+            sent_count += 1
+    
+    return {"status": "sent", "contacts_notified": sent_count}
+
 # ===================== LOCATION ENDPOINTS =====================
 
 @api_router.post("/location/ping")

@@ -13,6 +13,9 @@ import { useLiveLocationTracker, useLocationReporter, useGeofenceMonitor, useOff
 import VoiceSOS from '../components/VoiceSOS';
 import QuickAccess from '../components/QuickAccess';
 import SafetyScore from '../components/SafetyScore';
+import OneChanceMode from '../components/OneChanceMode';
+import NigeriaEmergencyNumbers from '../components/NigeriaEmergencyNumbers';
+import SMSFallback from '../components/SMSFallback';
 
 const Home = () => {
   const { user, api } = useAuth();
@@ -402,11 +405,23 @@ const Home = () => {
         disabled={sosActive}
       />
 
+      {/* One-Chance Mode - Silent Distress for Vehicle Robbery */}
+      <OneChanceMode 
+        onSOSTriggered={activateSOS}
+        disabled={sosActive}
+      />
+
       {/* Quick Access - Nearest Safety Points */}
       <QuickAccess />
 
       {/* Safety Score */}
       <SafetyScore />
+
+      {/* Nigeria Emergency Numbers - Compact */}
+      <NigeriaEmergencyNumbers compact className="tg-card p-4" />
+
+      {/* SMS Fallback for Offline */}
+      <SMSFallback />
 
       {/* Emergency Contacts Preview */}
       {contacts.length > 0 && (

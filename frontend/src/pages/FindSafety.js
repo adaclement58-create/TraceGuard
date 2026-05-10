@@ -8,6 +8,7 @@ import {
 import { Button } from '../components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
 import OfflineMapManager from '../components/OfflineMapManager';
+import NigeriaEmergencyNumbers from '../components/NigeriaEmergencyNumbers';
 
 // Google Maps API Key
 const GOOGLE_MAPS_API_KEY = process.env.REACT_APP_GOOGLE_MAPS_API_KEY;
@@ -737,27 +738,8 @@ const FindSafety = () => {
         )}
       </div>
 
-      {/* Emergency Hotlines */}
-      <div className="tg-card p-4 bg-tg-danger/10 border-tg-danger/30">
-        <h3 className="font-semibold text-tg-danger mb-3 flex items-center gap-2">
-          <Phone className="w-5 h-5" />
-          Emergency Hotlines
-        </h3>
-        <div className="grid grid-cols-3 gap-2">
-          <a href="tel:112" className="p-3 bg-zinc-800/50 rounded-xl text-center hover:bg-zinc-700/50">
-            <p className="text-lg font-bold">112</p>
-            <p className="text-xs text-zinc-500">Emergency</p>
-          </a>
-          <a href="tel:199" className="p-3 bg-zinc-800/50 rounded-xl text-center hover:bg-zinc-700/50">
-            <p className="text-lg font-bold">199</p>
-            <p className="text-xs text-zinc-500">Police</p>
-          </a>
-          <a href="tel:767" className="p-3 bg-zinc-800/50 rounded-xl text-center hover:bg-zinc-700/50">
-            <p className="text-lg font-bold">767</p>
-            <p className="text-xs text-zinc-500">LASEMA</p>
-          </a>
-        </div>
-      </div>
+      {/* Nigeria Emergency Numbers - Enhanced */}
+      <NigeriaEmergencyNumbers />
     </div>
   );
 };
