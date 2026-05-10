@@ -1,8 +1,17 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 
 const RECONNECT_INTERVAL = 5000;
 const MAX_RECONNECT_ATTEMPTS = 5;
 const HEARTBEAT_INTERVAL = 30000;
+
+// Helper to safely get token
+const getStoredToken = () => {
+  try {
+    return localStorage.getItem('tg_token');
+  } catch {
+    return null;
+  }
+};
 
 export function useWebSocket(url) {
   const [isConnected, setIsConnected] = useState(false);
@@ -17,7 +26,7 @@ export function useWebSocket(url) {
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
 
-    const token = localStorage.getItem('tg_token');
+    const token = getStoredToken();
     if (!token) {
       console.log('[WS] No auth token, skipping connection');
       return;

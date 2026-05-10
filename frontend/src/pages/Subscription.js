@@ -258,8 +258,8 @@ const Subscription = () => {
               </div>
 
               <ul className="space-y-2 mb-6 flex-1">
-                {plan.features.map((feature, index) => (
-                  <li key={index} className="flex items-start gap-2 text-sm">
+                {plan.features.map((feature) => (
+                  <li key={`${plan.id}-${feature.text}`} className="flex items-start gap-2 text-sm">
                     {feature.included ? (
                       <Check className="w-4 h-4 text-tg-safe flex-shrink-0 mt-0.5" />
                     ) : (

@@ -1,7 +1,10 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import axios from 'axios';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+
+// Token storage key
+const TOKEN_KEY = 'tg_token';
 
 const AuthContext = createContext(null);
 
@@ -13,131 +16,93 @@ export const useAuth = () => {
   return context;
 };
 
+// Helper to safely get token
+const getStoredToken = () => {
+  try {
+    return localStorage.getItem(TOKEN_KEY);
+  } catch {
+    return null;
+  }
+};
+
+// Helper to safely store token
+const storeToken = (token) => {
+  try {
+    if (token) {
+      localStorage.setItem(TOKEN_KEY, token);
+    } else {
+      localStorage.removeItem(TOKEN_KEY);
+    }
+  } catch (error) {
+    console.error('[Auth] Token storage error:', error);
+  }
+};
+
+// Helper to safely remove token
+const removeToken = () => {
+  try {
+    localStorage.removeItem(TOKEN_KEY);
+  } catch (error) {
+    console.error('[Auth] Token removal error:', error);
+  }
+};
+
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
-  const [token, setToken] = useState(localStorage.getItem('tg_token'));
+  const [token, setToken] = useState(() => getStoredToken());
   const [loading, setLoading] = useState(true);
   const [userLocation, setUserLocation] = useState(null);
+  const watchIdRef = useRef(null);
 
-  const api = axios.create({
-    baseURL: API,
-    headers: token ? { Authorization: `Bearer ${token}` } : {}
-  });
+  // Create axios instance with useMemo
+  const api = useMemo(() => {
+    const instance = axios.create({
+      baseURL: API,
+    });
 
-  api.interceptors.request.use((config) => {
-    const currentToken = localStorage.getItem('tg_token');
-    if (currentToken) {
-      config.headers.Authorization = `Bearer ${currentToken}`;
-    }
-    return config;
-  });
-
-  // Handle Google OAuth callback - check for token in URL
-  useEffect(() => {
-    const handleOAuthCallback = async () => {
-      const urlParams = new URLSearchParams(window.location.search);
-      const hashParams = new URLSearchParams(window.location.hash.replace('#', '?'));
-      
-      // Try multiple token parameter names that Emergent Auth might use
-      const oauthToken = urlParams.get('token') || 
-                          urlParams.get('access_token') || 
-                          hashParams.get('token') ||
-                          hashParams.get('access_token');
-      
-      if (oauthToken) {
-        console.log('[Auth] OAuth token received, exchanging with backend...');
-        
-        try {
-          // Exchange OAuth token with our backend to get our JWT
-          const response = await axios.post(`${API}/auth/google`, {
-            token: oauthToken
-          });
-          
-          const { access_token, user: userData } = response.data;
-          console.log('[Auth] Token exchanged successfully');
-          
-          localStorage.setItem('tg_token', access_token);
-          setToken(access_token);
-          setUser(userData);
-          
-          // Clean URL - remove both search params and hash
-          window.history.replaceState({}, document.title, window.location.pathname);
-        } catch (error) {
-          console.error('[Auth] OAuth token exchange failed:', error);
-          // Clean URL anyway
-          window.history.replaceState({}, document.title, window.location.pathname);
-        }
+    instance.interceptors.request.use((config) => {
+      const currentToken = getStoredToken();
+      if (currentToken) {
+        config.headers.Authorization = `Bearer ${currentToken}`;
       }
-    };
-    
-    handleOAuthCallback();
-  }, []);
+      return config;
+    });
 
-  const fetchUser = useCallback(async () => {
-    const storedToken = localStorage.getItem('tg_token');
-    if (!storedToken) {
-      setLoading(false);
-      return;
-    }
-    try {
-      const response = await axios.get(`${API}/auth/me`, {
-        headers: { Authorization: `Bearer ${storedToken}` }
-      });
-      setUser(response.data);
-      
-      // Get user location after successful auth
-      getUserLocation();
-      
-      // Update location in backend
-      updateUserLocationInBackend(response.data.email);
-    } catch (error) {
-      console.error('[Auth] Failed to fetch user:', error);
-      localStorage.removeItem('tg_token');
-      setToken(null);
-      setUser(null);
-    } finally {
-      setLoading(false);
-    }
+    return instance;
   }, []);
 
   // Get user's current location
   const getUserLocation = useCallback(() => {
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          const location = {
-            latitude: position.coords.latitude,
-            longitude: position.coords.longitude,
-            accuracy: position.coords.accuracy,
-            timestamp: new Date().toISOString()
-          };
-          setUserLocation(location);
-          console.log('[Auth] User location obtained:', location);
-        },
-        (error) => {
-          console.error('[Auth] Location error:', error);
-        },
-        { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
-      );
-    }
+    if (!navigator.geolocation) return;
+    
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setUserLocation({
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+          accuracy: position.coords.accuracy,
+          timestamp: new Date().toISOString()
+        });
+      },
+      (error) => {
+        console.error('[Auth] Location error:', error);
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+    );
   }, []);
 
   // Update user location in backend
-  const updateUserLocationInBackend = useCallback(async (email) => {
+  const updateUserLocationInBackend = useCallback(async () => {
     if (!navigator.geolocation) return;
     
     navigator.geolocation.getCurrentPosition(
       async (position) => {
         try {
-          const storedToken = localStorage.getItem('tg_token');
-          await axios.put(`${API}/location/update`, {
+          await api.put('/location/update', {
             latitude: position.coords.latitude,
             longitude: position.coords.longitude,
             accuracy: position.coords.accuracy
-          }, {
-            headers: { Authorization: `Bearer ${storedToken}` }
           });
-          console.log('[Auth] Location updated in backend');
         } catch (error) {
           console.error('[Auth] Failed to update location:', error);
         }
@@ -147,17 +112,81 @@ export const AuthProvider = ({ children }) => {
       },
       { enableHighAccuracy: true, timeout: 10000 }
     );
+  }, [api]);
+
+  // Fetch user data
+  const fetchUser = useCallback(async () => {
+    const storedToken = getStoredToken();
+    if (!storedToken) {
+      setLoading(false);
+      return;
+    }
+    
+    try {
+      const response = await axios.get(`${API}/auth/me`, {
+        headers: { Authorization: `Bearer ${storedToken}` }
+      });
+      setUser(response.data);
+      getUserLocation();
+      updateUserLocationInBackend();
+    } catch (error) {
+      console.error('[Auth] Failed to fetch user:', error);
+      removeToken();
+      setToken(null);
+      setUser(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [getUserLocation, updateUserLocationInBackend]);
+
+  // Handle Google OAuth callback
+  useEffect(() => {
+    const handleOAuthCallback = async () => {
+      const urlParams = new URLSearchParams(window.location.search);
+      const hashParams = new URLSearchParams(window.location.hash.replace('#', '?'));
+      
+      const oauthToken = urlParams.get('token') || 
+                          urlParams.get('access_token') || 
+                          hashParams.get('token') ||
+                          hashParams.get('access_token');
+      
+      if (oauthToken) {
+        console.log('[Auth] OAuth token received, exchanging with backend...');
+        
+        try {
+          const response = await axios.post(`${API}/auth/google`, {
+            token: oauthToken
+          });
+          
+          const { access_token, user: userData } = response.data;
+          console.log('[Auth] Token exchanged successfully');
+          
+          storeToken(access_token);
+          setToken(access_token);
+          setUser(userData);
+          
+          // Clean URL
+          window.history.replaceState({}, document.title, window.location.pathname);
+        } catch (error) {
+          console.error('[Auth] OAuth token exchange failed:', error);
+          window.history.replaceState({}, document.title, window.location.pathname);
+        }
+      }
+    };
+    
+    handleOAuthCallback();
   }, []);
 
+  // Fetch user on mount or token change
   useEffect(() => {
     fetchUser();
   }, [fetchUser, token]);
 
-  // Watch location changes
+  // Watch location changes when user is logged in
   useEffect(() => {
-    if (!user) return;
+    if (!user || !navigator.geolocation) return;
     
-    const watchId = navigator.geolocation?.watchPosition(
+    watchIdRef.current = navigator.geolocation.watchPosition(
       (position) => {
         setUserLocation({
           latitude: position.coords.latitude,
@@ -171,54 +200,63 @@ export const AuthProvider = ({ children }) => {
     );
 
     return () => {
-      if (watchId) navigator.geolocation.clearWatch(watchId);
+      if (watchIdRef.current !== null) {
+        navigator.geolocation.clearWatch(watchIdRef.current);
+      }
     };
   }, [user]);
 
-  const login = async (email, password) => {
+  // Login function
+  const login = useCallback(async (email, password) => {
     const response = await axios.post(`${API}/auth/login`, { email, password });
     const { access_token, user: userData } = response.data;
-    localStorage.setItem('tg_token', access_token);
+    storeToken(access_token);
     setToken(access_token);
     setUser(userData);
     getUserLocation();
     return userData;
-  };
+  }, [getUserLocation]);
 
-  const register = async (email, password, full_name) => {
+  // Register function
+  const register = useCallback(async (email, password, full_name) => {
     const response = await axios.post(`${API}/auth/register`, { email, password, full_name });
     const { access_token, user: userData } = response.data;
-    localStorage.setItem('tg_token', access_token);
+    storeToken(access_token);
     setToken(access_token);
     setUser(userData);
     getUserLocation();
     return userData;
-  };
+  }, [getUserLocation]);
 
-  const logout = () => {
-    localStorage.removeItem('tg_token');
+  // Logout function
+  const logout = useCallback(() => {
+    removeToken();
     setToken(null);
     setUser(null);
     setUserLocation(null);
-  };
+  }, []);
 
-  const updateUser = (userData) => {
-    setUser(prev => ({ ...prev, ...userData }));
-  };
+  // Update user function
+  const updateUser = useCallback((userData) => {
+    setUser(prev => prev ? { ...prev, ...userData } : userData);
+  }, []);
+
+  // Memoize context value to prevent unnecessary re-renders
+  const contextValue = useMemo(() => ({ 
+    user, 
+    token, 
+    loading, 
+    userLocation,
+    login, 
+    register, 
+    logout, 
+    updateUser, 
+    api,
+    getUserLocation 
+  }), [user, token, loading, userLocation, login, register, logout, updateUser, api, getUserLocation]);
 
   return (
-    <AuthContext.Provider value={{ 
-      user, 
-      token, 
-      loading, 
-      userLocation,
-      login, 
-      register, 
-      logout, 
-      updateUser, 
-      api,
-      getUserLocation 
-    }}>
+    <AuthContext.Provider value={contextValue}>
       {children}
     </AuthContext.Provider>
   );

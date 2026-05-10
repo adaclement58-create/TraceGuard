@@ -204,25 +204,42 @@ export const useGeofenceMonitor = ({
 export const useOfflineSOS = ({ api }) => {
   const QUEUE_KEY = 'traceguard_offline_sos';
 
+  // Helper to safely access localStorage
+  const getQueue = useCallback(() => {
+    try {
+      return JSON.parse(localStorage.getItem(QUEUE_KEY) || '[]');
+    } catch {
+      return [];
+    }
+  }, []);
+
+  const setQueue = useCallback((queue) => {
+    try {
+      localStorage.setItem(QUEUE_KEY, JSON.stringify(queue));
+    } catch (error) {
+      console.error('Failed to save queue:', error);
+    }
+  }, []);
+
   const queueSOS = useCallback((sosData) => {
     try {
-      const queue = JSON.parse(localStorage.getItem(QUEUE_KEY) || '[]');
+      const queue = getQueue();
       queue.push({
         ...sosData,
         queued_at: new Date().toISOString()
       });
-      localStorage.setItem(QUEUE_KEY, JSON.stringify(queue));
+      setQueue(queue);
       console.log('SOS queued for offline sync');
     } catch (error) {
       console.error('Failed to queue SOS:', error);
     }
-  }, []);
+  }, [getQueue, setQueue]);
 
   const flushQueue = useCallback(async () => {
     if (!navigator.onLine || !api) return;
 
     try {
-      const queue = JSON.parse(localStorage.getItem(QUEUE_KEY) || '[]');
+      const queue = getQueue();
       if (queue.length === 0) return;
 
       for (const sos of queue) {
@@ -240,11 +257,11 @@ export const useOfflineSOS = ({ api }) => {
       }
 
       // Clear queue after successful sync
-      localStorage.removeItem(QUEUE_KEY);
+      setQueue([]);
     } catch (error) {
       console.error('Failed to flush offline queue:', error);
     }
-  }, [api]);
+  }, [api, getQueue, setQueue]);
 
   // Auto-flush when coming back online
   useEffect(() => {

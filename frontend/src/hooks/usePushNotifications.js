@@ -1,6 +1,16 @@
 import { useState, useEffect, useCallback } from 'react';
 
 const VAPID_PUBLIC_KEY = 'BEl62iUYgUivxIkv69yViEuiBIa-Ib9-SkvMeAtA3LFgDzkrxZJjSgSnfckjBJuBkr3qBUYIHBQFLXYp5Nksh8U';
+const API_URL = process.env.REACT_APP_BACKEND_URL;
+
+// Helper to safely get token
+const getStoredToken = () => {
+  try {
+    return localStorage.getItem('tg_token');
+  } catch {
+    return null;
+  }
+};
 
 // Convert base64 to Uint8Array for VAPID key
 function urlBase64ToUint8Array(base64String) {
@@ -80,9 +90,8 @@ export function usePushNotifications() {
       setIsSubscribed(true);
 
       // Send subscription to backend
-      const token = localStorage.getItem('tg_token');
+      const token = getStoredToken();
       if (token) {
-        const API_URL = process.env.REACT_APP_BACKEND_URL;
         await fetch(`${API_URL}/api/push/subscribe`, {
           method: 'POST',
           headers: {
@@ -118,9 +127,8 @@ export function usePushNotifications() {
       setIsSubscribed(false);
 
       // Notify backend
-      const token = localStorage.getItem('tg_token');
+      const token = getStoredToken();
       if (token) {
-        const API_URL = process.env.REACT_APP_BACKEND_URL;
         await fetch(`${API_URL}/api/push/unsubscribe`, {
           method: 'POST',
           headers: {

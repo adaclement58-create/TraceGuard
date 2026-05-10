@@ -704,7 +704,8 @@ async def create_profile(data: EmergencyProfileCreate, user: dict = Depends(get_
         "timestamp": datetime.now(timezone.utc).isoformat()
     })
     
-    if "_id" in profile_doc: del profile_doc["_id"]
+    if "_id" in profile_doc:
+        del profile_doc["_id"]
     return profile_doc
 
 @api_router.put("/profile")
@@ -772,7 +773,8 @@ async def create_contact(data: TrustedContactCreate, user: dict = Depends(get_cu
     }
     await db.trusted_contacts.insert_one(contact_doc)
     
-    if "_id" in contact_doc: del contact_doc["_id"]
+    if "_id" in contact_doc:
+        del contact_doc["_id"]
     return contact_doc
 
 @api_router.delete("/contacts/{contact_id}")
@@ -850,7 +852,8 @@ async def create_incident(data: IncidentCreate, background_tasks: BackgroundTask
     # Send alerts in background
     background_tasks.add_task(send_alerts_task, user["email"], incident_id, user["full_name"])
     
-    if "_id" in incident_doc: del incident_doc["_id"]
+    if "_id" in incident_doc:
+        del incident_doc["_id"]
     return incident_doc
 
 @api_router.put("/incidents/{incident_id}/resolve")
@@ -1054,7 +1057,8 @@ async def create_safe_zone(data: SafeZoneCreate, user: dict = Depends(get_curren
     }
     await db.safe_zones.insert_one(zone_doc)
     
-    if "_id" in zone_doc: del zone_doc["_id"]
+    if "_id" in zone_doc:
+        del zone_doc["_id"]
     return zone_doc
 
 @api_router.put("/safe-zones/{zone_id}")
@@ -1144,7 +1148,8 @@ async def create_trip(data: TripCreate, user: dict = Depends(get_current_user)):
         {"$set": {"status": "trip_active"}}
     )
     
-    if "_id" in trip_doc: del trip_doc["_id"]
+    if "_id" in trip_doc:
+        del trip_doc["_id"]
     return trip_doc
 
 @api_router.post("/trips/{trip_id}/check-in")
@@ -1234,7 +1239,8 @@ async def upload_evidence(data: EvidenceCreate, user: dict = Depends(get_current
         "timestamp": datetime.now(timezone.utc).isoformat()
     })
     
-    if "_id" in evidence_doc: del evidence_doc["_id"]
+    if "_id" in evidence_doc:
+        del evidence_doc["_id"]
     return evidence_doc
 
 # ===================== SUBSCRIPTION ENDPOINTS =====================
@@ -1469,7 +1475,8 @@ async def create_organization(data: OrganizationCreate, user: dict = Depends(get
     }
     await db.organizations.insert_one(org_doc)
     
-    if "_id" in org_doc: del org_doc["_id"]
+    if "_id" in org_doc:
+        del org_doc["_id"]
     return org_doc
 
 @api_router.post("/organization/initialize-payment")
@@ -1532,7 +1539,8 @@ async def add_org_employee(email: str, role: str = "employee", user: dict = Depe
     }
     await db.org_members.insert_one(member_doc)
     
-    if "_id" in member_doc: del member_doc["_id"]
+    if "_id" in member_doc:
+        del member_doc["_id"]
     return member_doc
 
 # ===================== ADMIN ENDPOINTS =====================
@@ -1571,12 +1579,12 @@ async def get_admin_stats(user: dict = Depends(get_current_user)):
     }
 
 @api_router.put("/admin/incidents/{incident_id}")
-async def update_incident_status(incident_id: str, status: str, resolution_reason: Optional[str] = None, user: dict = Depends(get_current_user)):
+async def update_incident_status(incident_id: str, new_status: str, resolution_reason: Optional[str] = None, user: dict = Depends(get_current_user)):
     if user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Admin access required")
     
-    update_fields = {"status": status}
-    if status == "resolved":
+    update_fields = {"status": new_status}
+    if new_status == "resolved":
         update_fields["resolved_at"] = datetime.now(timezone.utc).isoformat()
         update_fields["resolution_reason"] = resolution_reason or "admin_resolved"
     
@@ -1992,7 +2000,8 @@ async def get_safety_score(
     thirty_days_ago = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
     all_incidents = await db.incidents.find({
         "latitude": {"$exists": True},
-        "longitude": {"$exists": True}
+        "longitude": {"$exists": True},
+        "created_at": {"$gte": thirty_days_ago}
     }).to_list(1000)
     
     # Filter by distance and time
@@ -2033,6 +2042,12 @@ async def get_safety_score(
     
     # 3. Calculate base score components
     current_hour = datetime.now().hour
+    
+    # Initialize with defaults
+    time_score = 50
+    incident_score = 50
+    risk_level = "Moderate"
+    risk_color = "yellow"
     
     # Time-based risk (higher risk at night)
     if 6 <= current_hour < 18:

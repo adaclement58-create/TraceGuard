@@ -1,2 +1,20 @@
-# Models package
-from models.schemas import *
+# Models package - Explicit imports
+from models.schemas import (
+    UserRegister,
+    UserLogin,
+    TokenResponse,
+    EmergencyProfileCreate,
+    EmergencyProfileUpdate,
+    TrustedContactCreate,
+    TrustedContact,
+    IncidentCreate,
+    LocationPing,
+    TripCreate,
+    SafeZoneCreate,
+    EvidenceCreate,
+    SubscriptionInitialize,
+    OrganizationCreate,
+    OrgEmployeeAdd,
+    PushSubscriptionData,
+    FamilyMemberAdd,
+)

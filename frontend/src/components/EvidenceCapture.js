@@ -288,9 +288,9 @@ export const EvidenceCapture = ({
         <div className="mt-4 pt-4 border-t border-zinc-800">
           <p className="text-sm text-zinc-400 mb-2">Captured Evidence ({capturedItems.length})</p>
           <div className="space-y-2">
-            {capturedItems.map((item, index) => (
+            {capturedItems.map((item) => (
               <div 
-                key={index}
+                key={item.hash}
                 className="flex items-center justify-between p-2 bg-zinc-800/50 rounded-lg text-sm"
               >
                 <div className="flex items-center gap-2">
